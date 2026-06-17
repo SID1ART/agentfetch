@@ -68,13 +68,10 @@ async def _search_google(query: str, max_results: int) -> list[EngineResult]:
         loop = asyncio.get_event_loop()
 
         def _fetch():
-            return list(
-                search(
-                    query,
-                    num_results=max_results,
-                    lang="en",
-                )
-            )
+            try:
+                return list(search(query, num_results=max_results, lang="en"))
+            except TypeError:
+                return list(search(query, stop=max_results, lang="en"))
 
         results = await loop.run_in_executor(None, _fetch)
         return [
