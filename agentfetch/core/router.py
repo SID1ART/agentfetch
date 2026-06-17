@@ -463,8 +463,14 @@ async def smart_fetch(
         return result
 
     result = await _static_fetch(url, config)
-    if result.error and not _is_retryable(result.error):
-        return result
+    is_403 = result.error and (
+        "403" in result.error or "forbidden" in result.error.lower()
+    )
+    if result.error:
+        if not _is_retryable(result.error) and not is_403:
+            return result
+        if is_403:
+            logger.info("403 Forbidden for %s, falling through to browser", url)
 
     html = ""
     try:
@@ -490,7 +496,7 @@ async def smart_fetch(
     text, _, _ = extract_content(html, url, config)
     needs_browser, reasons = _needs_browser(html, text)
 
-    if engine == "browser" or needs_browser:
+    if engine == "browser" or needs_browser or (result.error and is_403):
         return await _browser_fetch(url, config)
 
     return result
