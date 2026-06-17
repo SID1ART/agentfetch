@@ -12,10 +12,19 @@ Works with **LangChain, LlamaIndex, CrewAI, AutoGen, Claude MCP, OpenAI function
 
 ## Install
 
+### Standard
 ```bash
-pip install git+https://github.com/S1D1ART/agentfetch.git
-# Or with extra integrations:
-pip install "agentfetch[langchain,llamaindex,crewai] @ git+https://github.com/S1D1ART/agentfetch.git"
+pip install git+https://github.com/SID1ART/agentfetch.git
+```
+
+### Cloud notebooks (Colab, Jupyter, Kaggle)
+```bash
+pip install https://github.com/SID1ART/agentfetch/archive/main.zip
+```
+
+### With extra integrations
+```bash
+pip install "agentfetch[langchain,llamaindex,crewai] @ git+https://github.com/SID1ART/agentfetch.git"
 ```
 
 No PyPI account, no API tokens, no sign-up needed. GitHub is the source.
@@ -56,7 +65,7 @@ tools = AgentFetchTools
 ### MCP (Claude Desktop, Cursor, etc.)
 
 ```bash
-pip install git+https://github.com/S1D1ART/agentfetch.git
+pip install git+https://github.com/SID1ART/agentfetch.git
 agentfetch-mcp
 # configure in Claude Desktop or any MCP host
 ```
@@ -64,7 +73,16 @@ agentfetch-mcp
 ### REST API
 
 ```bash
-pip install git+https://github.com/S1D1ART/agentfetch.git
+pip install git+https://github.com/SID1ART/agentfetch.git
+agentfetch serve
+curl -X POST http://localhost:8080/agent_scrape \
+  -d '{"url": "https://example.com"}'
+```
+
+### REST API
+
+```bash
+pip install git+https://github.com/SID1ART/agentfetch.git
 agentfetch serve
 curl -X POST http://localhost:8080/agent_scrape \
   -d '{"url": "https://example.com"}'
@@ -93,14 +111,14 @@ print(result.citations)  # [1], [2] URLs
 
 | Framework | Install | Import |
 |-----------|---------|--------|
-| LangChain | `pip install "agentfetch[langchain] @ git+https://github.com/S1D1ART/agentfetch.git"` | `from agentfetch.integrations.langchain.tools import AgentFetchTools` |
-| LlamaIndex | `pip install "agentfetch[llamaindex] @ git+https://github.com/S1D1ART/agentfetch.git"` | `from agentfetch.integrations.llamaindex.tools import AgentFetchToolSpec` |
-| CrewAI | `pip install "agentfetch[crewai] @ git+https://github.com/S1D1ART/agentfetch.git"` | `from agentfetch.integrations.crewai.tools import scrape_tool` |
-| AutoGen | `pip install git+https://github.com/S1D1ART/agentfetch.git` | `from agentfetch.integrations.openai.tools import get_tools` |
-| OpenAI / Gemini / Groq | `pip install git+https://github.com/S1D1ART/agentfetch.git` | `from agentfetch.integrations.openai.tools import get_tools` |
-| Claude MCP | `pip install git+https://github.com/S1D1ART/agentfetch.git` | `agentfetch-mcp` |
-| Ollama | `pip install git+https://github.com/S1D1ART/agentfetch.git` | `from agentfetch.integrations.ollama.tools import ollama_extract` |
-| REST | `pip install git+https://github.com/S1D1ART/agentfetch.git` | `agentfetch serve` |
+| LangChain | `pip install "agentfetch[langchain] @ git+https://github.com/SID1ART/agentfetch.git"` | `from agentfetch.integrations.langchain.tools import AgentFetchTools` |
+| LlamaIndex | `pip install "agentfetch[llamaindex] @ git+https://github.com/SID1ART/agentfetch.git"` | `from agentfetch.integrations.llamaindex.tools import AgentFetchToolSpec` |
+| CrewAI | `pip install "agentfetch[crewai] @ git+https://github.com/SID1ART/agentfetch.git"` | `from agentfetch.integrations.crewai.tools import scrape_tool` |
+| AutoGen | `pip install git+https://github.com/SID1ART/agentfetch.git` | `from agentfetch.integrations.openai.tools import get_tools` |
+| OpenAI / Gemini / Groq | `pip install git+https://github.com/SID1ART/agentfetch.git` | `from agentfetch.integrations.openai.tools import get_tools` |
+| Claude MCP | `pip install git+https://github.com/SID1ART/agentfetch.git` | `agentfetch-mcp` |
+| Ollama | `pip install git+https://github.com/SID1ART/agentfetch.git` | `from agentfetch.integrations.ollama.tools import ollama_extract` |
+| REST | `pip install git+https://github.com/SID1ART/agentfetch.git` | `agentfetch serve` |
 
 ## Configuration
 
