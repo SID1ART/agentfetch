@@ -32,6 +32,7 @@ Homepage = "https://github.com/[YOUR_USERNAME]/agentfetch"
 langchain = ["langchain>=0.2", "langchain-core>=0.2"]
 llamaindex = ["llama-index>=0.10"]
 crewai = ["crewai>=0.55"]
+curl-cffi = ["curl-cffi>=0.7"]
 all = ["agentfetch[langchain,llamaindex,crewai]"]
 
 [project.scripts]
