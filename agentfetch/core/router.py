@@ -260,7 +260,7 @@ async def _static_fetch(
         links=links,
         retries=retries,
         normalized_url=normalize_url(url),
-        citations=citations if citations else None,
+        citations=citations if config.citation_links else None,
         proxy_used=proxy_used,
     )
 
@@ -308,7 +308,7 @@ async def _try_cloudflare(
         injection_detected=injection_detected,
         links=links,
         normalized_url=normalize_url(url),
-        citations=citations if citations else None,
+        citations=citations if (config and config.citation_links) else None,
     )
 
 
@@ -398,7 +398,7 @@ async def _browser_fetch(
         injection_detected=injection_detected,
         links=links,
         normalized_url=normalize_url(url),
-        citations=citations if citations else None,
+        citations=citations if (config and config.citation_links) else None,
     )
 
 
