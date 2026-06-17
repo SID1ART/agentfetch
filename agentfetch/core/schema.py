@@ -64,3 +64,4 @@ class SearchResult(BaseModel):
     sources_used: list[str] = Field(default_factory=list)
     suggestions: Optional[list[str]] = None
     total_results: int = 0
+    errors: dict[str, str] = Field(default_factory=dict)

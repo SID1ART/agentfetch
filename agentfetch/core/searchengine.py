@@ -88,7 +88,15 @@ async def _search_google(query: str, max_results: int) -> list[EngineResult]:
         logger.debug("googlesearch-python not installed, skipping Google search")
         return []
     except Exception as e:
-        logger.warning("Google search failed: %s", e)
+        msg = str(e)
+        if (
+            "429" in msg
+            or "rate limit" in msg.lower()
+            or "too many requests" in msg.lower()
+        ):
+            logger.warning("Google rate limited (429) for query: %s", query)
+        else:
+            logger.warning("Google search failed: %s", msg)
         return []
 
 
@@ -167,14 +175,22 @@ ENGINE_REGISTRY: dict[str, callable] = {
     "searxng": _search_searxng,
 }
 
+_ENGINE_FN_MAP: dict[str, str] = {
+    "duckduckgo": "_search_ddg",
+    "google": "_search_google",
+    "bing": "_search_bing",
+    "searxng": "_search_searxng",
+}
+
 
 def _get_engine_fn(name: str) -> callable:
     import sys
 
-    mod = sys.modules[__name__]
-    attr = f"_search_{name}"
-    if hasattr(mod, attr):
-        return getattr(mod, attr)
+    attr = _ENGINE_FN_MAP.get(name)
+    if attr:
+        mod = sys.modules[__name__]
+        if hasattr(mod, attr):
+            return getattr(mod, attr)
     return ENGINE_REGISTRY.get(name, _search_ddg)
 
 
@@ -183,7 +199,7 @@ async def parallel_search(
     sources: Optional[list[str]] = None,
     max_results: int = 5,
     searxng_url: str = "",
-) -> tuple[list[EngineResult], list[str]]:
+) -> tuple[list[EngineResult], list[str], dict[str, str]]:
     if sources is None:
         sources = ["duckduckgo", "google", "bing"]
         if searxng_url or SEARXNG_URL:
@@ -207,20 +223,24 @@ async def parallel_search(
     seen_urls: dict[str, str] = {}
     merged: list[EngineResult] = []
     engines_used: set[str] = set()
+    engine_errors: dict[str, str] = {}
 
     for i, src_results in enumerate(results):
         src_name = valid_sources[i]
         if isinstance(src_results, Exception):
-            logger.warning("Engine %s raised exception: %s", src_name, src_results)
+            engine_errors[src_name] = str(src_results)
+            logger.warning("Engine %s failed: %s", src_name, src_results)
             continue
         engines_used.add(src_name)
+        if not src_results:
+            engine_errors[src_name] = "returned zero results"
         for r in src_results:
             dedup_key = r.url.rstrip("/").lower()
             if dedup_key not in seen_urls:
                 seen_urls[dedup_key] = r.url
                 merged.append(r)
 
-    return merged[:max_results], sorted(engines_used)
+    return merged[:max_results], sorted(engines_used), engine_errors
 
 
 async def search_fetch(
@@ -231,7 +251,7 @@ async def search_fetch(
     searxng_url: str = "",
     config: Optional[ScrapeConfig] = None,
 ) -> SearchResult:
-    results, engines_used = await parallel_search(
+    results, engines_used, engine_errors = await parallel_search(
         query=query,
         sources=sources,
         max_results=max_results,
@@ -278,5 +298,6 @@ async def search_fetch(
         results=fetch_results,
         source=source_label,
         sources_used=engines_used,
+        errors=engine_errors,
         total_results=len(results),
     )

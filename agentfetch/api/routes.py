@@ -300,7 +300,7 @@ async def health():
         "ollama": ollama_ok,
         "robots_check": bool(os.environ.get("AGENTFETCH_ROBOTS_CHECK")),
         "proxies_loaded": False,
-        "version": "0.1.0",
+        "version": "0.2.0",
     }
 
 

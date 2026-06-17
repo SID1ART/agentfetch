@@ -59,11 +59,14 @@ def test_is_retryable():
 @pytest.mark.asyncio
 async def test_static_url_returns_static_mode():
     with patch("agentfetch.core.router._static_fetch") as mock_static:
-        mock_static.return_value = FetchResult(
-            url="https://example.com/file.txt",
-            content="hello",
-            confidence=0.9,
-            render_mode="static",
+        mock_static.return_value = (
+            FetchResult(
+                url="https://example.com/file.txt",
+                content="hello",
+                confidence=0.9,
+                render_mode="static",
+            ),
+            "<html>hello</html>",
         )
         result = await smart_fetch("https://example.com/file.txt")
         assert result.render_mode == "static"
@@ -72,11 +75,14 @@ async def test_static_url_returns_static_mode():
 @pytest.mark.asyncio
 async def test_errors_return_fetch_result_not_exception():
     with patch("agentfetch.core.router._static_fetch") as mock_static:
-        mock_static.return_value = FetchResult(
-            url="https://example.com/error",
-            content="",
-            confidence=0.0,
-            error="Connection error",
+        mock_static.return_value = (
+            FetchResult(
+                url="https://example.com/error",
+                content="",
+                confidence=0.0,
+                error="Connection error",
+            ),
+            "",
         )
         result = await smart_fetch("https://example.com/error")
         assert isinstance(result, FetchResult)
@@ -135,21 +141,22 @@ async def test_cloudflare_fetch_with_ja3_config():
 async def test_smart_fetch_with_scrape_config():
     config = ScrapeConfig(scrape_links=False, max_content_length=100)
     with patch("agentfetch.core.router._static_fetch") as mock_static:
-        mock_static.return_value = FetchResult(
-            url="https://example.com",
-            content="test content",
-            title="Test",
-            confidence=1.0,
-            content_type="unknown",
-            word_count=2,
-            render_mode="static",
-            latency_ms=0,
-            injection_detected=False,
-            links=None,
-            retries=0,
-            normalized_url="https://example.com",
+        mock_static.return_value = (
+            FetchResult(
+                url="https://example.com",
+                content="test content",
+                title="Test",
+                confidence=1.0,
+                content_type="unknown",
+                word_count=2,
+                render_mode="static",
+                latency_ms=0,
+                injection_detected=False,
+                links=None,
+                retries=0,
+                normalized_url="https://example.com",
+            ),
+            "",
         )
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client.side_effect = Exception("mock network closed")
-            result = await smart_fetch("https://example.com", config=config)
-            assert result.content == "test content"
+        result = await smart_fetch("https://example.com", config=config)
+        assert result.content == "test content"

@@ -236,7 +236,7 @@ async def _fetch_with_retry(
 async def _static_fetch(
     url: str,
     config: Optional[ScrapeConfig] = None,
-) -> FetchResult:
+) -> tuple[FetchResult, str]:
     start = time.monotonic()
     retries = 0
     config = config or ScrapeConfig()
@@ -254,7 +254,7 @@ async def _static_fetch(
             retries=retries,
             normalized_url=normalize_url(url),
             proxy_used=proxy_used,
-        )
+        ), ""
     text, extractor, citations = extract_content(html, url, config)
     text, injection_detected = sanitize(text, url)
     content_type = detect_content_type(html, url)
@@ -277,7 +277,7 @@ async def _static_fetch(
         normalized_url=normalize_url(url),
         citations=citations if config.citation_links else None,
         proxy_used=proxy_used,
-    )
+    ), html
 
 
 async def _cloudflare_fetch(url: str, ja3: Optional[str] = None) -> Optional[str]:
@@ -296,9 +296,6 @@ async def _cloudflare_fetch(url: str, ja3: Optional[str] = None) -> Optional[str
             return resp.text
     except ImportError:
         logger.debug("curl_cffi not installed, skipping Cloudflare bypass")
-        return None
-    except Exception as e:
-        logger.warning("curl_cffi fetch failed for %s: %s", url, e)
         return None
     except Exception as e:
         logger.warning("curl_cffi fetch failed for %s: %s", url, e)
@@ -482,29 +479,16 @@ async def smart_fetch(
             )
 
     if _is_static_url(url):
-        result = await _static_fetch(url, config)
+        result, _ = await _static_fetch(url, config)
         result.render_mode = "static"
         return result
 
-    result = await _static_fetch(url, config)
+    result, html = await _static_fetch(url, config)
     is_403 = result.error and (
         "403" in result.error or "forbidden" in result.error.lower()
     )
-    if result.error:
-        if not _is_retryable(result.error) and not is_403:
-            return result
-        if is_403:
-            logger.info("403 Forbidden for %s, falling through to browser", url)
-
-    html = ""
-    try:
-        async with httpx.AsyncClient(
-            headers=_get_headers(config.headers), timeout=STATIC_TIMEOUT
-        ) as client:
-            resp = await client.get(url, follow_redirects=True)
-            html = resp.text
-    except Exception:
-        html = ""
+    if result.error and not is_403:
+        return result
 
     if not html:
         return result

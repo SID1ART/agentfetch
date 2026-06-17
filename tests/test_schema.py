@@ -133,6 +133,18 @@ def test_search_result_new_fields():
     assert sr.sources_used == ["duckduckgo", "google"]
     assert sr.total_results == 1
     assert sr.suggestions is None
+    assert sr.errors == {}
+
+
+def test_search_result_with_errors():
+    sr = SearchResult(
+        query="test",
+        results=[],
+        errors={"google": "429 rate limited", "bing": "returned zero results"},
+    )
+    assert "google" in sr.errors
+    assert "429" in sr.errors["google"]
+    assert sr.total_results == 0
 
 
 def test_scrape_config_ja3_default():
