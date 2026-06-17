@@ -10,15 +10,21 @@ from typing import Optional
 
 import httpx
 
-from .schema import FetchResult
+from .schema import FetchResult, ScrapeConfig
 from .extractor import extract_content, detect_content_type
 from .sanitizer import sanitize
+from .normalizer import normalize_url, extract_domain
+from .robotstxt import RobotsChecker
+from .proxymanager import ProxyManager
 
 logger = logging.getLogger("agentfetch.router")
 
 STATIC_TIMEOUT = int(os.environ.get("AGENTFETCH_STATIC_TIMEOUT", "15"))
 BROWSER_TIMEOUT = int(os.environ.get("AGENTFETCH_BROWSER_TIMEOUT", "30"))
 COOKIES_FILE = os.environ.get("AGENTFETCH_COOKIES_FILE", "")
+MAX_RETRIES = int(os.environ.get("AGENTFETCH_MAX_RETRIES", "2"))
+DOMAIN_DELAY = float(os.environ.get("AGENTFETCH_DOMAIN_DELAY", "0.5"))
+ROBOTS_CHECK = os.environ.get("AGENTFETCH_ROBOTS_CHECK", "false").lower() == "true"
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -29,9 +35,58 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:126.0) Gecko/20100101 Firefox/126.0",
 ]
 
+_domain_last_access: dict[str, float] = {}
+_robots_checker: Optional[RobotsChecker] = None
+_proxy_manager: Optional[ProxyManager] = None
 
-def _get_headers() -> dict:
-    return {
+
+def _get_robots() -> RobotsChecker:
+    global _robots_checker
+    if _robots_checker is None:
+        _robots_checker = RobotsChecker()
+    return _robots_checker
+
+
+def _get_proxy_manager() -> ProxyManager:
+    global _proxy_manager
+    if _proxy_manager is None:
+        _proxy_manager = ProxyManager()
+    return _proxy_manager
+
+
+async def _domain_throttle(url: str, delay: Optional[float] = None):
+    domain = extract_domain(url)
+    now = time.monotonic()
+    last = _domain_last_access.get(domain, 0.0)
+    d = delay if delay is not None else DOMAIN_DELAY
+    elapsed = now - last
+    if elapsed < d:
+        await asyncio.sleep(d - elapsed)
+    _domain_last_access[domain] = time.monotonic()
+
+
+def _is_retryable(error: str) -> bool:
+    retryable_patterns = [
+        "timeout",
+        "connection refused",
+        "connection reset",
+        "connection aborted",
+        "remote end closed",
+        "temporarily unavailable",
+        "too many requests",
+        "503",
+        "502",
+        "429",
+        "408",
+        "name resolution error",
+        "read timeout",
+    ]
+    lower = error.lower()
+    return any(p in lower for p in retryable_patterns)
+
+
+def _get_headers(custom_headers: Optional[dict[str, str]] = None) -> dict:
+    headers = {
         "User-Agent": random.choice(USER_AGENTS),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
@@ -40,6 +95,9 @@ def _get_headers() -> dict:
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
     }
+    if custom_headers:
+        headers.update(custom_headers)
+    return headers
 
 
 def _load_cookies() -> list[dict]:
@@ -62,12 +120,7 @@ def _load_cookies() -> list[dict]:
             if len(parts) >= 7:
                 domain, _, path_str, secure, expires, name, value = parts[:7]
                 jars.append(
-                    {
-                        "name": name,
-                        "value": value,
-                        "domain": domain,
-                        "path": path_str,
-                    }
+                    {"name": name, "value": value, "domain": domain, "path": path_str}
                 )
         return jars
     except Exception as e:
@@ -108,15 +161,73 @@ def _needs_browser(html: str, extracted_text: str) -> tuple[bool, list[str]]:
     return len(reasons) > 0, reasons
 
 
-async def _static_fetch(url: str) -> FetchResult:
+async def _fetch_with_retry(
+    url: str,
+    config: Optional[ScrapeConfig] = None,
+) -> tuple[str, int, Optional[str]]:
+    last_error = ""
+    proxy_used = None
+    config = config or ScrapeConfig()
+    timeout = STATIC_TIMEOUT
+
+    for attempt in range(1 + MAX_RETRIES):
+        robots_delay = 0.0
+        if ROBOTS_CHECK:
+            robots_delay = await _get_robots().crawl_delay(url)
+        await _domain_throttle(url, delay=max(DOMAIN_DELAY, robots_delay))
+
+        proxy = config.proxy
+        if not proxy:
+            pm = _get_proxy_manager()
+            if pm.is_enabled():
+                proxy = await pm.get_proxy()
+
+        try:
+            client_kwargs = {
+                "headers": _get_headers(config.headers),
+                "timeout": timeout,
+            }
+            if proxy:
+                client_kwargs["proxies"] = proxy
+
+            async with httpx.AsyncClient(**client_kwargs) as client:
+                resp = await client.get(url, follow_redirects=True)
+                resp.raise_for_status()
+                if proxy:
+                    proxy_used = proxy
+                    await pm.mark_success(proxy)
+                return resp.text, attempt, proxy_used
+        except Exception as e:
+            last_error = str(e)
+            if proxy:
+                await pm.mark_failed(proxy)
+            if not _is_retryable(last_error) and attempt < MAX_RETRIES:
+                logger.info("Non-retryable error for %s: %s", url, last_error)
+                raise
+            if attempt < MAX_RETRIES:
+                wait = (2**attempt) + random.uniform(0, 0.5)
+                logger.info(
+                    "Retry %d/%d for %s after %.1fs (error: %s)",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    url,
+                    wait,
+                    last_error,
+                )
+                await asyncio.sleep(wait)
+    raise Exception(last_error)
+
+
+async def _static_fetch(
+    url: str,
+    config: Optional[ScrapeConfig] = None,
+) -> FetchResult:
     start = time.monotonic()
+    retries = 0
+    config = config or ScrapeConfig()
+    proxy_used = None
     try:
-        async with httpx.AsyncClient(
-            headers=_get_headers(), timeout=STATIC_TIMEOUT
-        ) as client:
-            resp = await client.get(url, follow_redirects=True)
-            resp.raise_for_status()
-            html = resp.text
+        html, retries, proxy_used = await _fetch_with_retry(url, config)
     except Exception as e:
         return FetchResult(
             url=url,
@@ -125,14 +236,17 @@ async def _static_fetch(url: str) -> FetchResult:
             error=str(e),
             latency_ms=int((time.monotonic() - start) * 1000),
             render_mode="static",
+            retries=retries,
+            normalized_url=normalize_url(url),
+            proxy_used=proxy_used,
         )
-    text, extractor = extract_content(html, url)
+    text, extractor, citations = extract_content(html, url, config)
     text, injection_detected = sanitize(text, url)
     content_type = detect_content_type(html, url)
     title = _extract_title(html)
     latency = int((time.monotonic() - start) * 1000)
     wc = len(text.split())
-    links = _extract_links(html)
+    links = _extract_links(html) if config.scrape_links else None
     return FetchResult(
         url=url,
         content=text,
@@ -144,6 +258,10 @@ async def _static_fetch(url: str) -> FetchResult:
         latency_ms=latency,
         injection_detected=injection_detected,
         links=links,
+        retries=retries,
+        normalized_url=normalize_url(url),
+        citations=citations if citations else None,
+        proxy_used=proxy_used,
     )
 
 
@@ -164,17 +282,21 @@ async def _cloudflare_fetch(url: str) -> Optional[str]:
         return None
 
 
-async def _try_cloudflare(url: str) -> Optional[FetchResult]:
+async def _try_cloudflare(
+    url: str,
+    config: Optional[ScrapeConfig] = None,
+) -> Optional[FetchResult]:
     html = await _cloudflare_fetch(url)
     if not html:
         return None
-    text, extractor = extract_content(html, url)
+    config = config or ScrapeConfig()
+    text, extractor, citations = extract_content(html, url, config)
     text, injection_detected = sanitize(text, url)
     if not text:
         return None
     content_type = detect_content_type(html, url)
     title = _extract_title(html)
-    links = _extract_links(html)
+    links = _extract_links(html) if config.scrape_links else None
     return FetchResult(
         url=url,
         content=text,
@@ -185,15 +307,22 @@ async def _try_cloudflare(url: str) -> Optional[FetchResult]:
         render_mode="static",
         injection_detected=injection_detected,
         links=links,
+        normalized_url=normalize_url(url),
+        citations=citations if citations else None,
     )
 
 
-async def _browser_fetch(url: str) -> FetchResult:
+async def _browser_fetch(
+    url: str,
+    config: Optional[ScrapeConfig] = None,
+) -> FetchResult:
     start = time.monotonic()
+    config = config or ScrapeConfig()
     try:
         from playwright.async_api import async_playwright
 
-        cookies = _load_cookies()
+        cookies = config.cookies or _load_cookies()
+        viewport = config.viewport or {"width": 1920, "height": 1080}
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(
@@ -206,7 +335,7 @@ async def _browser_fetch(url: str) -> FetchResult:
             )
             context = await browser.new_context(
                 user_agent=random.choice(USER_AGENTS),
-                viewport={"width": 1920, "height": 1080},
+                viewport=viewport,
                 locale="en-US",
                 timezone_id="America/New_York",
             )
@@ -215,10 +344,20 @@ async def _browser_fetch(url: str) -> FetchResult:
                 await context.add_cookies(cookies)
 
             page = await context.new_page()
-
             await page.goto(
                 url, wait_until="networkidle", timeout=BROWSER_TIMEOUT * 1000
             )
+
+            if config.wait_for:
+                try:
+                    await page.wait_for_selector(config.wait_for, timeout=5000)
+                except Exception:
+                    logger.debug(
+                        "wait_for selector '%s' not found on %s", config.wait_for, url
+                    )
+
+            if config.js_wait_ms:
+                await page.wait_for_timeout(config.js_wait_ms)
 
             html = await page.content()
             await browser.close()
@@ -230,15 +369,16 @@ async def _browser_fetch(url: str) -> FetchResult:
             error=str(e),
             latency_ms=int((time.monotonic() - start) * 1000),
             render_mode="browser",
+            normalized_url=normalize_url(url),
         )
 
-    text, extractor = extract_content(html, url)
+    text, extractor, citations = extract_content(html, url, config)
     text, injection_detected = sanitize(text, url)
     content_type = detect_content_type(html, url)
     title = _extract_title(html)
     latency = int((time.monotonic() - start) * 1000)
     wc = len(text.split())
-    links = _extract_links(html)
+    links = _extract_links(html) if config.scrape_links else None
 
     confidence = 1.0
     confidence -= 0.2
@@ -257,6 +397,8 @@ async def _browser_fetch(url: str) -> FetchResult:
         latency_ms=latency,
         injection_detected=injection_detected,
         links=links,
+        normalized_url=normalize_url(url),
+        citations=citations if citations else None,
     )
 
 
@@ -293,29 +435,43 @@ async def smart_fetch(
     use_cache: bool = True,
     cache_ttl: int = 3600,
     cookies: Optional[list[dict]] = None,
+    config: Optional[ScrapeConfig] = None,
 ) -> FetchResult:
+    raw_url = url
+    url = normalize_url(url)
+    config = config or ScrapeConfig()
+
     if cookies:
-        global COOKIES_FILE
-        tmp_file = Path(f"/tmp/agentfetch_cookies_{int(time.time())}.json")
-        tmp_file.write_text(json.dumps(cookies))
-        COOKIES_FILE = str(tmp_file)
+        config.cookies = cookies
+
+    if ROBOTS_CHECK:
+        robots = _get_robots()
+        allowed = await robots.is_allowed(url)
+        if not allowed:
+            return FetchResult(
+                url=url,
+                content="",
+                confidence=0.0,
+                error=f"Blocked by robots.txt: {url}",
+                robots_allowed=False,
+                normalized_url=url,
+            )
 
     if _is_static_url(url):
-        result = await _static_fetch(url)
+        result = await _static_fetch(url, config)
         result.render_mode = "static"
         return result
 
-    result = await _static_fetch(url)
-    if result.error:
+    result = await _static_fetch(url, config)
+    if result.error and not _is_retryable(result.error):
         return result
 
     html = ""
-    get_url = url
     try:
         async with httpx.AsyncClient(
-            headers=_get_headers(), timeout=STATIC_TIMEOUT
+            headers=_get_headers(config.headers), timeout=STATIC_TIMEOUT
         ) as client:
-            resp = await client.get(get_url, follow_redirects=True)
+            resp = await client.get(url, follow_redirects=True)
             html = resp.text
     except Exception:
         html = ""
@@ -325,27 +481,32 @@ async def smart_fetch(
 
     if _is_cloudflare(html):
         logger.info("Cloudflare detected for %s, trying bypass", url)
-        cf_result = await _try_cloudflare(url)
+        cf_result = await _try_cloudflare(url, config)
         if cf_result and cf_result.content:
             cf_result.render_mode = "static"
             return cf_result
         logger.info("Cloudflare bypass failed for %s, falling through to browser", url)
 
-    text, _ = extract_content(html, url)
+    text, _, _ = extract_content(html, url, config)
     needs_browser, reasons = _needs_browser(html, text)
 
     if engine == "browser" or needs_browser:
-        return await _browser_fetch(url)
+        return await _browser_fetch(url, config)
 
     return result
 
 
-async def batch_fetch(urls: list[str], concurrency: int = 5) -> list[FetchResult]:
+async def batch_fetch(
+    urls: list[str],
+    concurrency: int = 5,
+    config: Optional[ScrapeConfig] = None,
+) -> list[FetchResult]:
+    normalized = [normalize_url(u) for u in urls]
     sem = asyncio.Semaphore(concurrency)
 
     async def _fetch_one(url: str) -> FetchResult:
         async with sem:
-            return await smart_fetch(url)
+            return await smart_fetch(url, config=config)
 
-    tasks = [_fetch_one(url) for url in urls]
+    tasks = [_fetch_one(url) for url in normalized]
     return await asyncio.gather(*tasks)

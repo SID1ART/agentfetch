@@ -9,9 +9,13 @@ services:
       - REDIS_URL=redis://redis:6379
       - SEARXNG_URL=${SEARXNG_URL:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OLLAMA_URL=${OLLAMA_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
       - AGENTFETCH_CACHE_TTL=${AGENTFETCH_CACHE_TTL:-3600}
       - AGENTFETCH_MAX_CONCURRENCY=${AGENTFETCH_MAX_CONCURRENCY:-5}
       - AGENTFETCH_PORT=8080
+      - AGENTFETCH_ROBOTS_CHECK=${AGENTFETCH_ROBOTS_CHECK:-false}
+      - AGENTFETCH_PROXY_LIST=${AGENTFETCH_PROXY_LIST:-}
     depends_on:
       - redis
     restart: unless-stopped
@@ -25,9 +29,22 @@ services:
       - REDIS_URL=redis://redis:6379
       - SEARXNG_URL=${SEARXNG_URL:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OLLAMA_URL=${OLLAMA_URL:-}
     depends_on:
       - redis
     restart: unless-stopped
+
+  agentfetch-worker:
+    build: .
+    command: python -c "import asyncio; from agentfetch.core.job_queue import crawl_worker; asyncio.run(crawl_worker())"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - AGENTFETCH_ROBOTS_CHECK=${AGENTFETCH_ROBOTS_CHECK:-true}
+    depends_on:
+      - redis
+    restart: unless-stopped
+    profiles:
+      - worker
 
   redis:
     image: redis:alpine

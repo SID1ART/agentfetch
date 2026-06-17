@@ -21,6 +21,26 @@ async def list_tools():
                 "properties": {
                     "url": {"type": "string"},
                     "engine": {"type": "string", "default": "auto"},
+                    "wait_for": {
+                        "type": "string",
+                        "default": "",
+                        "description": "CSS selector to wait for before extracting",
+                    },
+                    "include_tags": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Comma-separated list of HTML tags to include",
+                    },
+                    "exclude_tags": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Comma-separated list of HTML tags to exclude",
+                    },
+                    "citation_links": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Replace URLs with [1], [2] citation markers",
+                    },
                 },
                 "required": ["url"],
             },
@@ -85,9 +105,21 @@ async def call_tool(name: str, arguments: dict) -> list:
 
     try:
         if name == "agent_scrape":
+            from ..core.schema import ScrapeConfig
+
             url = arguments["url"]
             engine = arguments.get("engine", "auto")
-            result = await smart_fetch(url, engine=engine)
+            config = ScrapeConfig(
+                wait_for=arguments.get("wait_for") or None,
+                include_tags=arguments.get("include_tags").split(",")
+                if arguments.get("include_tags")
+                else None,
+                exclude_tags=arguments.get("exclude_tags").split(",")
+                if arguments.get("exclude_tags")
+                else None,
+                citation_links=arguments.get("citation_links", False),
+            )
+            result = await smart_fetch(url, engine=engine, config=config)
             return [{"type": "text", "text": _format_result(result)}]
 
         elif name == "agent_crawl":
