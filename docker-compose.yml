@@ -1,0 +1,39 @@
+version: "3.9"
+
+services:
+  agentfetch-api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - SEARXNG_URL=${SEARXNG_URL:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - AGENTFETCH_CACHE_TTL=${AGENTFETCH_CACHE_TTL:-3600}
+      - AGENTFETCH_MAX_CONCURRENCY=${AGENTFETCH_MAX_CONCURRENCY:-5}
+      - AGENTFETCH_PORT=8080
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  agentfetch-mcp:
+    build: .
+    command: agentfetch-mcp
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - SEARXNG_URL=${SEARXNG_URL:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:alpine
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:
