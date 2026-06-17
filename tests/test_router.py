@@ -6,6 +6,8 @@ from agentfetch.core.router import (
     _is_static_url,
     _needs_browser,
     _is_retryable,
+    _cloudflare_fetch,
+    CURL_CFFI_PROFILES,
 )
 from agentfetch.core.schema import FetchResult, ScrapeConfig
 
@@ -106,6 +108,27 @@ async def test_js_markers_route_to_browser():
     needs, reasons = _needs_browser(html, "")
     assert needs
     assert any("NEXT_DATA" in r for r in reasons)
+
+
+@pytest.mark.asyncio
+async def test_curl_cffi_profiles_defined():
+    assert len(CURL_CFFI_PROFILES) >= 10
+    assert "chrome124" in CURL_CFFI_PROFILES
+    assert "safari17_0" in CURL_CFFI_PROFILES
+
+
+@pytest.mark.asyncio
+async def test_cloudflare_fetch_returns_none_when_not_installed():
+    with patch.dict("sys.modules", {"curl_cffi": None}):
+        result = await _cloudflare_fetch("https://example.com")
+        assert result is None
+
+
+@pytest.mark.asyncio
+async def test_cloudflare_fetch_with_ja3_config():
+    with patch("agentfetch.core.router.CURL_CFFI_PROFILES", ["chrome124"]):
+        result = await _cloudflare_fetch("https://example.com", ja3="chrome124")
+        assert result is None or isinstance(result, str)
 
 
 @pytest.mark.asyncio

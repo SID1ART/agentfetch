@@ -128,6 +128,21 @@ def _load_cookies() -> list[dict]:
         return []
 
 
+CURL_CFFI_PROFILES = [
+    "chrome99",
+    "chrome101",
+    "chrome104",
+    "chrome107",
+    "chrome110",
+    "chrome116",
+    "chrome119",
+    "chrome120",
+    "chrome123",
+    "chrome124",
+    "safari15_3",
+    "safari17_0",
+]
+
 JS_FRAMEWORK_MARKERS = [
     "__NEXT_DATA__",
     "__NUXT__",
@@ -265,11 +280,16 @@ async def _static_fetch(
     )
 
 
-async def _cloudflare_fetch(url: str) -> Optional[str]:
+async def _cloudflare_fetch(url: str, ja3: Optional[str] = None) -> Optional[str]:
     try:
         from curl_cffi.requests import AsyncSession
 
-        async with AsyncSession(impersonate="chrome124") as session:
+        profile = (
+            ja3
+            or os.environ.get("AGENTFETCH_JA3_PROFILE", "")
+            or random.choice(CURL_CFFI_PROFILES)
+        )
+        async with AsyncSession(impersonate=profile) as session:
             resp = await session.get(
                 url, headers=_get_headers(), timeout=STATIC_TIMEOUT
             )
@@ -280,13 +300,17 @@ async def _cloudflare_fetch(url: str) -> Optional[str]:
     except Exception as e:
         logger.warning("curl_cffi fetch failed for %s: %s", url, e)
         return None
+    except Exception as e:
+        logger.warning("curl_cffi fetch failed for %s: %s", url, e)
+        return None
 
 
 async def _try_cloudflare(
     url: str,
     config: Optional[ScrapeConfig] = None,
 ) -> Optional[FetchResult]:
-    html = await _cloudflare_fetch(url)
+    config = config or ScrapeConfig()
+    html = await _cloudflare_fetch(url, ja3=config.ja3)
     if not html:
         return None
     config = config or ScrapeConfig()

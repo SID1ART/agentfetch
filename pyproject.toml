@@ -51,7 +51,8 @@ llamaindex = ["llama-index>=0.10"]
 crewai = ["crewai>=0.55"]
 curl-cffi = ["curl-cffi>=0.7"]
 ollama = []  # uses httpx which is already a dep
-all = ["agentfetch[langchain,llamaindex,crewai,curl-cffi]"]
+search = ["googlesearch-python>=1.2"]  # adds Google search engine support
+all = ["agentfetch[langchain,llamaindex,crewai,curl-cffi,search]"]
 
 [project.scripts]
 agentfetch = "agentfetch.api.app:cli"

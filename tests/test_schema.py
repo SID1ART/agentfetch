@@ -1,6 +1,12 @@
 import json
 import pytest
-from agentfetch.core.schema import FetchResult, CrawlResult, SearchResult, ScrapeConfig
+from agentfetch.core.schema import (
+    FetchResult,
+    CrawlResult,
+    SearchResult,
+    SearchConfig,
+    ScrapeConfig,
+)
 
 
 def test_fetch_result_serializes_to_json():
@@ -88,6 +94,55 @@ def test_scrape_config_custom():
     assert c.max_content_length == 10000
     assert c.citation_links is True
     assert c.proxy == "http://proxy:8080"
+
+
+def test_search_config_defaults():
+    c = SearchConfig()
+    assert c.max_results == 5
+    assert c.sources is None
+    assert c.scrape_results is True
+    assert c.searxng_url == ""
+    assert c.proxy is None
+
+
+def test_search_config_custom():
+    c = SearchConfig(
+        max_results=10,
+        sources=["duckduckgo", "google"],
+        scrape_results=False,
+        searxng_url="http://searxng:8888",
+        proxy="http://proxy:8080",
+    )
+    assert c.max_results == 10
+    assert c.sources == ["duckduckgo", "google"]
+    assert c.scrape_results is False
+    assert c.searxng_url == "http://searxng:8888"
+    assert c.proxy == "http://proxy:8080"
+
+
+def test_search_result_new_fields():
+    fr = FetchResult(url="https://example.com", content="test", confidence=0.5)
+    sr = SearchResult(
+        query="test query",
+        results=[fr],
+        source="duckduckgo+google",
+        sources_used=["duckduckgo", "google"],
+        total_results=1,
+    )
+    assert sr.source == "duckduckgo+google"
+    assert sr.sources_used == ["duckduckgo", "google"]
+    assert sr.total_results == 1
+    assert sr.suggestions is None
+
+
+def test_scrape_config_ja3_default():
+    c = ScrapeConfig()
+    assert c.ja3 is None
+
+
+def test_scrape_config_custom_ja3():
+    c = ScrapeConfig(ja3="safari17_0")
+    assert c.ja3 == "safari17_0"
 
 
 def test_fetch_result_new_fields():

@@ -10,8 +10,15 @@ from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 
 from ..core.router import smart_fetch, batch_fetch
+from ..core.searchengine import parallel_search, search_fetch, _configure_searxng
 from ..core.sanitizer import sanitize
-from ..core.schema import FetchResult, CrawlResult, SearchResult, ScrapeConfig
+from ..core.schema import (
+    FetchResult,
+    CrawlResult,
+    SearchResult,
+    SearchConfig,
+    ScrapeConfig,
+)
 from ..core.stopper import CrawlStopper
 from ..core.robotstxt import RobotsChecker
 from ..core.job_queue import JobQueue
@@ -24,6 +31,9 @@ SEARXNG_URL = os.environ.get("SEARXNG_URL", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
 CACHE_TTL = int(os.environ.get("AGENTFETCH_CACHE_TTL", "3600"))
+
+if SEARXNG_URL:
+    _configure_searxng(SEARXNG_URL)
 
 redis_client = None
 if REDIS_URL:
@@ -152,70 +162,18 @@ async def agent_crawl(
 
 @router.post("/agent_search")
 async def agent_search(req: SearchRequest) -> SearchResult:
-    all_results: list[FetchResult] = []
-    source = "duckduckgo"
-
-    if SEARXNG_URL:
-        source = "searxng"
-        try:
-            import httpx
-
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"{SEARXNG_URL}/search",
-                    json={"q": req.query, "format": "json"},
-                )
-                data = resp.json()
-                for item in data.get("results", [])[: req.max_results]:
-                    url = item.get("url", "")
-                    if req.scrape_results and url:
-                        fr = await smart_fetch(url)
-                        all_results.append(fr)
-                    else:
-                        all_results.append(
-                            FetchResult(
-                                url=url,
-                                content=item.get("content", ""),
-                                title=item.get("title"),
-                                confidence=0.5,
-                                render_mode="static",
-                            )
-                        )
-        except Exception as e:
-            logger.warning("SearXNG search failed: %s", e)
-            source = "duckduckgo"
-    else:
-        source = "duckduckgo"
-
-    if source == "duckduckgo" or not all_results:
-        source = "duckduckgo"
-        suggestions = None
-        try:
-            from duckduckgo_search import DDGS
-
-            with DDGS() as ddgs:
-                for r in ddgs.text(req.query, max_results=req.max_results):
-                    url = r.get("href", "")
-                    if req.scrape_results and url:
-                        fr = await smart_fetch(url)
-                        all_results.append(fr)
-                    else:
-                        all_results.append(
-                            FetchResult(
-                                url=url,
-                                content=r.get("body", ""),
-                                title=r.get("title"),
-                                confidence=0.5,
-                                render_mode="static",
-                            )
-                        )
-        except Exception as e:
-            logger.warning("DuckDuckGo search failed: %s", e)
-
-    return SearchResult(
+    config = SearchConfig(
+        max_results=req.max_results,
+        sources=req.sources,
+        scrape_results=req.scrape_results,
+        searxng_url=SEARXNG_URL,
+    )
+    return await search_fetch(
         query=req.query,
-        results=all_results,
-        source=source,
+        sources=config.sources,
+        max_results=config.max_results,
+        scrape_results=config.scrape_results,
+        searxng_url=config.searxng_url,
     )
 
 

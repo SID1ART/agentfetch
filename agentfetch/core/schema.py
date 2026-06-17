@@ -14,6 +14,7 @@ class ScrapeConfig(BaseModel):
     proxy: Optional[str] = None
     cookies: Optional[list[dict]] = None
     headers: Optional[dict[str, str]] = None
+    ja3: Optional[str] = None
 
 
 class FetchResult(BaseModel):
@@ -48,8 +49,18 @@ class CrawlResult(BaseModel):
     queued: bool = False
 
 
+class SearchConfig(BaseModel):
+    max_results: int = 5
+    sources: Optional[list[str]] = None
+    scrape_results: bool = True
+    searxng_url: str = ""
+    proxy: Optional[str] = None
+
+
 class SearchResult(BaseModel):
     query: str
     results: list[FetchResult] = Field(default_factory=list)
     source: str = "duckduckgo"
+    sources_used: list[str] = Field(default_factory=list)
     suggestions: Optional[list[str]] = None
+    total_results: int = 0
