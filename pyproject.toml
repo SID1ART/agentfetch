@@ -8,6 +8,20 @@ version = "0.2.0"
 description = "Open-source web retrieval built for AI agents. Works with LangChain, LlamaIndex, CrewAI, AutoGen, Claude, GPT, Gemini, and any REST agent."
 license = { text = "MIT" }
 requires-python = ">=3.10"
+authors = [
+    { name = "S1D1ART", email = "sid@agentfetch.dev" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "httpx>=0.27",
     "trafilatura>=1.9",
@@ -26,7 +40,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/[YOUR_USERNAME]/agentfetch"
+Homepage = "https://github.com/S1D1ART/agentfetch"
+Repository = "https://github.com/S1D1ART/agentfetch"
+Documentation = "https://github.com/S1D1ART/agentfetch"
+"Bug Tracker" = "https://github.com/S1D1ART/agentfetch/issues"
 
 [project.optional-dependencies]
 langchain = ["langchain>=0.2", "langchain-core>=0.2"]
