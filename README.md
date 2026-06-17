@@ -10,6 +10,16 @@ agentfetch is a free, local alternative to Firecrawl, Exa, and Parallel.ai. It f
 
 Works with **LangChain, LlamaIndex, CrewAI, AutoGen, Claude MCP, OpenAI function calling, Gemini, Groq, and plain REST.** No vendor lock-in, no API keys required.
 
+## Install
+
+```bash
+pip install git+https://github.com/S1D1ART/agentfetch.git
+# Or with extra integrations:
+pip install "agentfetch[langchain,llamaindex,crewai] @ git+https://github.com/S1D1ART/agentfetch.git"
+```
+
+No PyPI account, no API tokens, no sign-up needed. GitHub is the source.
+
 ### What makes it different
 
 - **Smart Mode Router** — detects JavaScript-heavy SPAs (Next.js, Nuxt, React) and falls back to Playwright headless browser automatically. Static pages use direct HTTP.
@@ -46,7 +56,7 @@ tools = AgentFetchTools
 ### MCP (Claude Desktop, Cursor, etc.)
 
 ```bash
-pip install agentfetch
+pip install git+https://github.com/S1D1ART/agentfetch.git
 agentfetch-mcp
 # configure in Claude Desktop or any MCP host
 ```
@@ -54,7 +64,7 @@ agentfetch-mcp
 ### REST API
 
 ```bash
-pip install agentfetch
+pip install git+https://github.com/S1D1ART/agentfetch.git
 agentfetch serve
 curl -X POST http://localhost:8080/agent_scrape \
   -d '{"url": "https://example.com"}'
@@ -68,7 +78,7 @@ from agentfetch import smart_fetch
 from agentfetch.core.schema import ScrapeConfig
 
 result = asyncio.run(smart_fetch(
-    "https://example.com/spa-page",
+    "https://en.wikipedia.org/wiki/Obsession_(2025_film)",
     config=ScrapeConfig(
         wait_for=".main-content",
         exclude_tags=["nav", "footer"],
@@ -83,14 +93,14 @@ print(result.citations)  # [1], [2] URLs
 
 | Framework | Install | Import |
 |-----------|---------|--------|
-| LangChain | `pip install agentfetch[langchain]` | `from agentfetch.integrations.langchain.tools import AgentFetchTools` |
-| LlamaIndex | `pip install agentfetch[llamaindex]` | `from agentfetch.integrations.llamaindex.tools import AgentFetchToolSpec` |
-| CrewAI | `pip install agentfetch[crewai]` | `from agentfetch.integrations.crewai.tools import scrape_tool` |
-| AutoGen | `pip install agentfetch` | `from agentfetch.integrations.openai.tools import get_tools` |
-| OpenAI / Gemini / Groq | `pip install agentfetch` | `from agentfetch.integrations.openai.tools import get_tools` |
-| Claude MCP | `pip install agentfetch` | `agentfetch-mcp` |
-| Ollama | `pip install agentfetch` | `from agentfetch.integrations.ollama.tools import ollama_extract` |
-| REST | `pip install agentfetch` | `agentfetch serve` |
+| LangChain | `pip install "agentfetch[langchain] @ git+https://github.com/S1D1ART/agentfetch.git"` | `from agentfetch.integrations.langchain.tools import AgentFetchTools` |
+| LlamaIndex | `pip install "agentfetch[llamaindex] @ git+https://github.com/S1D1ART/agentfetch.git"` | `from agentfetch.integrations.llamaindex.tools import AgentFetchToolSpec` |
+| CrewAI | `pip install "agentfetch[crewai] @ git+https://github.com/S1D1ART/agentfetch.git"` | `from agentfetch.integrations.crewai.tools import scrape_tool` |
+| AutoGen | `pip install git+https://github.com/S1D1ART/agentfetch.git` | `from agentfetch.integrations.openai.tools import get_tools` |
+| OpenAI / Gemini / Groq | `pip install git+https://github.com/S1D1ART/agentfetch.git` | `from agentfetch.integrations.openai.tools import get_tools` |
+| Claude MCP | `pip install git+https://github.com/S1D1ART/agentfetch.git` | `agentfetch-mcp` |
+| Ollama | `pip install git+https://github.com/S1D1ART/agentfetch.git` | `from agentfetch.integrations.ollama.tools import ollama_extract` |
+| REST | `pip install git+https://github.com/S1D1ART/agentfetch.git` | `agentfetch serve` |
 
 ## Configuration
 
