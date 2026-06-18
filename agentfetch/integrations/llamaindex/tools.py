@@ -17,11 +17,9 @@ async def scrape(url: str, engine: str = "auto") -> str:
 
 
 async def search(query: str, max_results: int = 5) -> str:
-    req = type(
-        "SearchReq",
-        (),
-        {"query": query, "max_results": max_results, "scrape_results": True},
-    )()
+    from ...api.routes import SearchRequest
+
+    req = SearchRequest(query=query, max_results=max_results, scrape_results=True)
     result = await agent_search(req)
     lines = [f"Search results for: {result.query}", ""]
     for i, r in enumerate(result.results, 1):

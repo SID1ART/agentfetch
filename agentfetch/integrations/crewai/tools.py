@@ -21,9 +21,9 @@ async def scrape_tool(url: str) -> str:
 @tool("Search the web")
 async def search_tool(query: str) -> str:
     """Search the web and return scraped content from top results."""
-    req = type(
-        "SearchReq", (), {"query": query, "max_results": 5, "scrape_results": True}
-    )()
+    from ...api.routes import SearchRequest
+
+    req = SearchRequest(query=query, max_results=5, scrape_results=True)
     result = await agent_search(req)
     lines = [f"Search results for: {result.query}", ""]
     for i, r in enumerate(result.results, 1):

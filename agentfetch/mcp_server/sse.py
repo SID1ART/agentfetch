@@ -120,11 +120,11 @@ async def call_tool(name: str, arguments: dict) -> list:
         elif name == "agent_search":
             query = arguments["query"]
             max_results = arguments.get("max_results", 5)
-            req = type(
-                "SearchReq",
-                (),
-                {"query": query, "max_results": max_results, "scrape_results": True},
-            )()
+            from ..api.routes import SearchRequest
+
+            req = SearchRequest(
+                query=query, max_results=max_results, scrape_results=True
+            )
             result = await agent_search(req)
             lines = [
                 f"# Search Results for: {result.query}",

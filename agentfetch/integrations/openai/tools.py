@@ -94,15 +94,13 @@ async def handle_tool_call(name: str, args: dict) -> str:
             )
 
         elif name == "agentfetch_search":
-            req = type(
-                "SearchReq",
-                (),
-                {
-                    "query": args["query"],
-                    "max_results": args.get("max_results", 5),
-                    "scrape_results": True,
-                },
-            )()
+            from ...api.routes import SearchRequest
+
+            req = SearchRequest(
+                query=args["query"],
+                max_results=args.get("max_results", 5),
+                scrape_results=True,
+            )
             result = await agent_search(req)
             return json.dumps(
                 {

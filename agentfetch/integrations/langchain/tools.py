@@ -29,13 +29,9 @@ async def agentfetch_search(query: str, max_results: int = 5) -> str:
         query: Search query string.
         max_results: Maximum number of results to return.
     """
-    from ...api.routes import agent_search
+    from ...api.routes import agent_search, SearchRequest
 
-    req = type(
-        "SearchReq",
-        (),
-        {"query": query, "max_results": max_results, "scrape_results": True},
-    )()
+    req = SearchRequest(query=query, max_results=max_results, scrape_results=True)
     result = await agent_search(req)
     lines = [f"Search results for: {result.query} (source: {result.source})", ""]
     for i, r in enumerate(result.results, 1):
