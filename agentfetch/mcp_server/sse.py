@@ -145,7 +145,9 @@ async def call_tool(name: str, arguments: dict) -> list:
             schema = j.loads(arguments.get("schema", "{}"))
             from ..api.routes import agent_extract as ae
 
-            req = type("ExtractReq", (), {"url": url, "schema": schema})()
+            req = type(
+                "ExtractReq", (), {"url": url, "schema": schema, "provider": "auto"}
+            )()
             result = await ae(req)
             return [{"type": "text", "text": f"# Extracted Data\n\n{result.content}"}]
 

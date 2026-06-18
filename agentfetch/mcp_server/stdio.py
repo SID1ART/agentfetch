@@ -1,6 +1,7 @@
 import json
 import logging
 import sys
+import uuid
 
 from mcp.server import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
@@ -100,7 +101,7 @@ async def list_tools():
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list:
     from ..core.router import smart_fetch
-    from ..core.schema import FetchResult
+    from ..core.schema import FetchResult, CrawlResult
     from ..api.routes import _crawl_jobs, _run_crawl, agent_search
 
     try:
@@ -172,7 +173,9 @@ async def call_tool(name: str, arguments: dict) -> list:
             schema = json.loads(arguments.get("schema", "{}"))
             from ..api.routes import agent_extract as ae
 
-            extract_req = type("ExtractReq", (), {"url": url, "schema": schema})()
+            extract_req = type(
+                "ExtractReq", (), {"url": url, "schema": schema, "provider": "auto"}
+            )()
             result = await ae(extract_req)
             return [
                 {

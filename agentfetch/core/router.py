@@ -192,6 +192,7 @@ async def _fetch_with_retry(
         await _domain_throttle(url, delay=max(DOMAIN_DELAY, robots_delay))
 
         proxy = config.proxy
+        pm = None
         if not proxy:
             pm = _get_proxy_manager()
             if pm.is_enabled():
@@ -210,11 +211,12 @@ async def _fetch_with_retry(
                 resp.raise_for_status()
                 if proxy:
                     proxy_used = proxy
-                    await pm.mark_success(proxy)
+                    if pm:
+                        await pm.mark_success(proxy)
                 return resp.text, attempt, proxy_used
         except Exception as e:
             last_error = str(e)
-            if proxy:
+            if proxy and pm:
                 await pm.mark_failed(proxy)
             if not _is_retryable(last_error) and attempt < MAX_RETRIES:
                 logger.info("Non-retryable error for %s: %s", url, last_error)

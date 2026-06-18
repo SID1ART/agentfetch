@@ -63,12 +63,10 @@ def get_tools() -> list[dict]:
     ]
 
 
-def handle_tool_call(name: str, args: dict) -> str:
+async def handle_tool_call(name: str, args: dict) -> str:
     try:
         if name == "agentfetch_scrape":
-            result = asyncio.run(
-                smart_fetch(args["url"], engine=args.get("engine", "auto"))
-            )
+            result = await smart_fetch(args["url"], engine=args.get("engine", "auto"))
             return json.dumps(
                 {
                     "title": result.title,
@@ -90,7 +88,7 @@ def handle_tool_call(name: str, args: dict) -> str:
                     "scrape_results": True,
                 },
             )()
-            result = asyncio.run(agent_search(req))
+            result = await agent_search(req)
             return json.dumps(
                 {
                     "query": result.query,
@@ -122,6 +120,8 @@ def handle_tool_call(name: str, args: dict) -> str:
                 },
             )()
             _crawl_jobs[job_id] = result
+            import asyncio
+
             asyncio.create_task(_run_crawl(job_id, req))
             return json.dumps({"job_id": job_id, "status": "pending"})
 

@@ -360,16 +360,21 @@ async def _run_crawl(job_id: str, req: CrawlRequest):
             result.duplicates_skipped = stopper.duplicates_skipped
 
         if depth < req.max_depth and not fr.error:
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.get(url)
-                    soup = BeautifulSoup(resp.text, "html.parser")
-                    for a in soup.find_all("a", href=True):
-                        link = urljoin(url, a["href"])
-                        if link.startswith("http") and not stopper.is_url_seen(link):
-                            queue.append((link, depth + 1))
-            except Exception:
-                pass
+            links = fr.links
+            if not links:
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        resp = await client.get(url)
+                        soup = BeautifulSoup(resp.text, "html.parser")
+                        links = [
+                            urljoin(url, a["href"])
+                            for a in soup.find_all("a", href=True)
+                        ]
+                except Exception:
+                    links = []
+            for link in links:
+                if link.startswith("http") and not stopper.is_url_seen(link):
+                    queue.append((link, depth + 1))
 
     result.status = "complete"
     result.duplicates_skipped = stopper.duplicates_skipped

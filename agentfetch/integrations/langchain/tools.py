@@ -10,21 +10,19 @@ from ...core.schema import FetchResult
 
 
 @tool
-def agentfetch_scrape(url: str, engine: str = "auto") -> str:
+async def agentfetch_scrape(url: str, engine: str = "auto") -> str:
     """Fetch any webpage and return clean markdown content.
 
     Args:
         url: The URL to fetch.
         engine: 'auto', 'static', or 'browser'.
     """
-    import asyncio
-
-    result = asyncio.run(smart_fetch(url, engine=engine))
+    result = await smart_fetch(url, engine=engine)
     return _format_result(result)
 
 
 @tool
-def agentfetch_search(query: str, max_results: int = 5) -> str:
+async def agentfetch_search(query: str, max_results: int = 5) -> str:
     """Search the web and return scraped content from top results.
 
     Args:
@@ -32,14 +30,13 @@ def agentfetch_search(query: str, max_results: int = 5) -> str:
         max_results: Maximum number of results to return.
     """
     from ...api.routes import agent_search
-    import asyncio
 
     req = type(
         "SearchReq",
         (),
         {"query": query, "max_results": max_results, "scrape_results": True},
     )()
-    result = asyncio.run(agent_search(req))
+    result = await agent_search(req)
     lines = [f"Search results for: {result.query} (source: {result.source})", ""]
     for i, r in enumerate(result.results, 1):
         lines.append(f"{i}. {r.title or 'Untitled'}")
@@ -50,7 +47,7 @@ def agentfetch_search(query: str, max_results: int = 5) -> str:
 
 
 @tool
-def agentfetch_crawl(
+async def agentfetch_crawl(
     url: str, max_depth: int = 2, max_pages: int = 10, query: str = ""
 ) -> str:
     """Recursively crawl a website and gather information.
@@ -62,7 +59,6 @@ def agentfetch_crawl(
         query: Optional search query for relevance.
     """
     from ...api.routes import CrawlRequest, _run_crawl, _crawl_jobs
-    import asyncio
     import uuid
 
     job_id = str(uuid.uuid4())
@@ -79,6 +75,8 @@ def agentfetch_crawl(
         },
     )()
     _crawl_jobs[job_id] = result
+    import asyncio
+
     asyncio.create_task(_run_crawl(job_id, req))
     return f"Crawl started. Job ID: {job_id}"
 
