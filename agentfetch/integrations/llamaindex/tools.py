@@ -44,7 +44,9 @@ async def crawl(
 
 async def status(job_id: str) -> str:
     """Check the status of a crawl job."""
-    cr = _crawl_jobs.get(job_id)
+    from ...api.routes import _crawl_store
+
+    cr = _crawl_jobs.get(job_id) or _crawl_store.get(job_id)
     if not cr:
         return f"Job {job_id}: not found"
     return (

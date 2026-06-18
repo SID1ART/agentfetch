@@ -74,9 +74,9 @@ async def agentfetch_status(job_id: str) -> str:
     Args:
         job_id: The job ID returned by agentfetch_crawl.
     """
-    from ...api.routes import _crawl_jobs
+    from ...api.routes import _crawl_jobs, _crawl_store
 
-    cr = _crawl_jobs.get(job_id)
+    cr = _crawl_jobs.get(job_id) or _crawl_store.get(job_id)
     if not cr:
         return f"Job {job_id}: not found"
     return (

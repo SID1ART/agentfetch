@@ -129,8 +129,10 @@ async def handle_tool_call(name: str, args: dict) -> str:
             return json.dumps({"job_id": job_id, "status": "pending"})
 
         elif name == "agentfetch_status":
+            from ...api.routes import _crawl_store
+
             job_id = args["job_id"]
-            cr = _crawl_jobs.get(job_id)
+            cr = _crawl_jobs.get(job_id) or _crawl_store.get(job_id)
             if not cr:
                 return json.dumps({"error": f"Job {job_id}: not found"})
             return json.dumps(

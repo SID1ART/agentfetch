@@ -708,6 +708,22 @@ async def smart_fetch(
                 normalized_url=url,
             )
 
+    if engine == "browser":
+        tls_result = await _try_curl_cffi(url, config)
+        if tls_result and tls_result.content:
+            tls_result.render_mode = "bypass"
+            _quality_and_cache(url, tls_result)
+            return tls_result
+        stealth_result = await _browser_fetch(url, config)
+        if not stealth_result.content and config.stealth and STEALTH_BASIC_FALLBACK:
+            basic_config = config.model_copy(update={"stealth": False})
+            logger.info("Stealth browser failed for %s, trying basic browser", url)
+            basic_result = await _browser_fetch(url, basic_config)
+            _quality_and_cache(url, basic_result)
+            return basic_result
+        _quality_and_cache(url, stealth_result)
+        return stealth_result
+
     if _is_static_url(url):
         result, _ = await _static_fetch(url, config)
         result.render_mode = "static"
@@ -716,6 +732,12 @@ async def smart_fetch(
         return result
 
     result, html = await _static_fetch(url, config)
+
+    if engine == "static":
+        if use_cache:
+            _quality_and_cache(url, result)
+        return result
+
     is_403 = result.error and (
         "403" in result.error or "forbidden" in result.error.lower()
     )
@@ -743,7 +765,7 @@ async def smart_fetch(
     text, _, _ = extract_content(html, url, config)
     needs_browser, reasons = _needs_browser(html, text)
 
-    if engine == "browser" or needs_browser or (result.error and is_403):
+    if needs_browser or is_403:
         tls_result = await _try_curl_cffi(url, config)
         if tls_result and tls_result.content:
             tls_result.render_mode = "bypass"

@@ -48,7 +48,9 @@ async def crawl_tool(url: str) -> str:
 @tool("Check crawl status")
 async def status_tool(job_id: str) -> str:
     """Check the status of a crawl job. Provide the job_id returned by the crawl tool."""
-    cr = _crawl_jobs.get(job_id)
+    from ...api.routes import _crawl_store
+
+    cr = _crawl_jobs.get(job_id) or _crawl_store.get(job_id)
     if not cr:
         return f"Job {job_id}: not found"
     return (

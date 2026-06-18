@@ -7,7 +7,7 @@ from mcp.server.models import InitializationOptions
 
 from ..core.router import smart_fetch
 from ..core.schema import FetchResult, CrawlResult
-from ..api.routes import _crawl_jobs, _run_crawl, agent_search
+from ..api.routes import _crawl_jobs, _crawl_store, _run_crawl, agent_search
 
 logger = logging.getLogger("agentfetch.mcp.sse")
 
@@ -152,10 +152,13 @@ async def call_tool(name: str, arguments: dict) -> list:
 
         elif name == "agent_status":
             job_id = arguments["job_id"]
-            cr = _crawl_jobs.get(
-                job_id,
-                CrawlResult(job_id=job_id, status="failed", stopped_reason="not found"),
-            )
+            cr = _crawl_jobs.get(job_id)
+            if not cr:
+                cr = _crawl_store.get(job_id)
+            if not cr:
+                cr = CrawlResult(
+                    job_id=job_id, status="failed", stopped_reason="not found"
+                )
             msg = f"Job ID: {cr.job_id}\nStatus: {cr.status}\nPages: {cr.total_pages}\nStopped reason: {cr.stopped_reason}"
             return [{"type": "text", "text": msg}]
 

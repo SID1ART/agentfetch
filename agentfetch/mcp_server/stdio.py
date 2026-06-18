@@ -102,7 +102,7 @@ async def list_tools():
 async def call_tool(name: str, arguments: dict) -> list:
     from ..core.router import smart_fetch
     from ..core.schema import FetchResult, CrawlResult
-    from ..api.routes import _crawl_jobs, _run_crawl, agent_search
+    from ..api.routes import _crawl_jobs, _crawl_store, _run_crawl, agent_search
 
     try:
         if name == "agent_scrape":
@@ -189,12 +189,13 @@ async def call_tool(name: str, arguments: dict) -> list:
 
         elif name == "agent_status":
             job_id = arguments["job_id"]
-            from ..api.routes import _crawl_jobs
-
-            cr = _crawl_jobs.get(
-                job_id,
-                CrawlResult(job_id=job_id, status="failed", stopped_reason="not found"),
-            )
+            cr = _crawl_jobs.get(job_id)
+            if not cr:
+                cr = _crawl_store.get(job_id)
+            if not cr:
+                cr = CrawlResult(
+                    job_id=job_id, status="failed", stopped_reason="not found"
+                )
             return [
                 {
                     "type": "text",
