@@ -3,7 +3,7 @@ import logging
 import os
 import random
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, AsyncIterator
 from urllib.parse import quote
 
 import httpx
@@ -30,6 +30,26 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
 ]
 
+CATEGORY_QUERY_MODIFIERS = {
+    "company": "company OR startup OR headquarters OR funding",
+    "news": "latest OR today OR breaking",
+    "people": "LinkedIn OR profile OR bio OR founder",
+    "research_paper": "paper OR arXiv OR research OR study",
+    "personal_site": "blog OR personal site OR portfolio",
+}
+
+
+def generate_query_variations(query: str) -> list[str]:
+    variations = [query]
+    words = query.split()
+    if len(words) >= 3:
+        variations.append(" ".join(words[:-1]))
+    if len(words) >= 2:
+        variations.append(f"{query} overview")
+        variations.append(f"{query} guide")
+    return variations[:4]
+
+
 _search_proxy_manager: Optional[ProxyManager] = None
 
 
@@ -38,8 +58,6 @@ def _get_search_proxy() -> Optional[str]:
     if _search_proxy_manager is None:
         _search_proxy_manager = ProxyManager()
     if _search_proxy_manager.is_enabled():
-        import asyncio
-
         try:
             return asyncio.run(_search_proxy_manager.get_proxy())
         except RuntimeError:
@@ -88,9 +106,7 @@ class EngineResult:
     source: str
 
 
-def _search_client(
-    **kwargs,
-) -> httpx.AsyncClient:
+def _search_client(**kwargs) -> httpx.AsyncClient:
     proxy = _get_search_proxy()
     merged = {"timeout": SEARCH_TIMEOUT}
     if proxy:
@@ -364,61 +380,102 @@ def _get_engine_fn(name: str) -> callable:
     return ENGINE_REGISTRY.get(name, _search_ddg)
 
 
+def _resolve_sources(sources: Optional[list[str]], searxng_url: str) -> list[str]:
+    if sources is not None:
+        return [s for s in sources if s in ENGINE_REGISTRY] or ["duckduckgo"]
+    resolved = []
+    if BRAVE_SEARCH_API_KEY:
+        resolved.append("brave")
+    else:
+        resolved.append("duckduckgo")
+    if SERPAPI_KEY:
+        resolved.append("serpapi")
+    else:
+        resolved.append("google")
+    resolved.append("bing")
+    if searxng_url or SEARXNG_URL:
+        resolved.append("searxng")
+    return resolved
+
+
 async def parallel_search(
     query: str,
     sources: Optional[list[str]] = None,
     max_results: int = 5,
     searxng_url: str = "",
+    depth: str = "auto",
+    category: str = "auto",
 ) -> tuple[list[EngineResult], list[str], dict[str, str]]:
-    if sources is None:
-        sources = []
-        if BRAVE_SEARCH_API_KEY:
-            sources.append("brave")
-        else:
-            sources.append("duckduckgo")
-        if SERPAPI_KEY:
-            sources.append("serpapi")
-        else:
-            sources.append("google")
-        sources.append("bing")
-        if searxng_url or SEARXNG_URL:
-            sources.append("searxng")
+    valid_sources = _resolve_sources(sources, searxng_url)
 
-    valid_sources = [s for s in sources if s in ENGINE_REGISTRY]
-    if not valid_sources:
-        valid_sources = ["duckduckgo"]
-        sources = ["duckduckgo"]
+    if category != "auto" and category in CATEGORY_QUERY_MODIFIERS:
+        modifier = CATEGORY_QUERY_MODIFIERS[category]
+        query = f"({query}) {modifier}"
 
-    async def _run_with_retry(src: str) -> list[EngineResult]:
-        fn = _get_engine_fn(src)
-        if src == "searxng":
-            return await _with_search_retry(fn, query, max_results, searxng_url)
-        return await _with_search_retry(fn, query, max_results)
-
-    tasks = [_run_with_retry(src) for src in valid_sources]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    queries_to_run = [query]
+    if depth == "deep":
+        queries_to_run = generate_query_variations(query)
 
     seen_urls: dict[str, str] = {}
     merged: list[EngineResult] = []
     engines_used: set[str] = set()
     engine_errors: dict[str, str] = {}
 
-    for i, src_results in enumerate(results):
-        src_name = valid_sources[i]
-        if isinstance(src_results, Exception):
-            engine_errors[src_name] = str(src_results)
-            logger.warning("Engine %s failed: %s", src_name, src_results)
-            continue
-        engines_used.add(src_name)
-        if not src_results:
-            engine_errors[src_name] = "returned zero results"
-        for r in src_results:
-            dedup_key = r.url.rstrip("/").lower()
-            if dedup_key not in seen_urls:
-                seen_urls[dedup_key] = r.url
-                merged.append(r)
+    for q in queries_to_run:
+
+        async def _run_with_retry(src: str) -> list[EngineResult]:
+            fn = _get_engine_fn(src)
+            if src == "searxng":
+                return await _with_search_retry(fn, q, max_results, searxng_url)
+            return await _with_search_retry(fn, q, max_results)
+
+        tasks = [_run_with_retry(src) for src in valid_sources]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for i, src_results in enumerate(results):
+            src_name = valid_sources[i]
+            if isinstance(src_results, Exception):
+                engine_errors[src_name] = str(src_results)
+                logger.warning("Engine %s failed: %s", src_name, src_results)
+                continue
+            engines_used.add(src_name)
+            if not src_results:
+                engine_errors[src_name] = "returned zero results"
+            for r in src_results:
+                dedup_key = r.url.rstrip("/").lower()
+                if dedup_key not in seen_urls:
+                    seen_urls[dedup_key] = r.url
+                    merged.append(r)
 
     return merged[:max_results], sorted(engines_used), engine_errors
+
+
+async def stream_search(
+    query: str,
+    sources: Optional[list[str]] = None,
+    max_results: int = 5,
+    searxng_url: str = "",
+) -> AsyncIterator[EngineResult]:
+    valid_sources = _resolve_sources(sources, searxng_url)
+
+    async def _run_one(src: str) -> list[EngineResult]:
+        fn = _get_engine_fn(src)
+        if src == "searxng":
+            return await _with_search_retry(fn, query, max_results, searxng_url)
+        return await _with_search_retry(fn, query, max_results)
+
+    cores = [_run_one(src) for src in valid_sources]
+    seen: set[str] = set()
+    for coro in asyncio.as_completed(cores):
+        try:
+            results = await coro
+        except Exception:
+            continue
+        for r in results:
+            key = r.url.rstrip("/").lower()
+            if key not in seen:
+                seen.add(key)
+                yield r
 
 
 async def search_fetch(
@@ -428,19 +485,33 @@ async def search_fetch(
     scrape_results: bool = True,
     searxng_url: str = "",
     config: Optional[ScrapeConfig] = None,
+    category: str = "auto",
+    depth: str = "auto",
 ) -> SearchResult:
+    config = config or ScrapeConfig()
+    if category != "auto":
+        config.category = category
+
     results, engines_used, engine_errors = await parallel_search(
         query=query,
         sources=sources,
         max_results=max_results,
         searxng_url=searxng_url,
+        depth=depth,
+        category=category,
     )
 
     fetch_results: list[FetchResult] = []
     if scrape_results:
         fetch_tasks = []
         for r in results:
-            fetch_tasks.append(smart_fetch(r.url, config=config))
+            cfg = config.model_copy()
+            category_hint = category
+            if _guess_category_from_snippet(r.snippet, r.url) != "unknown":
+                category_hint = _guess_category_from_snippet(r.snippet, r.url)
+            if category_hint != "auto":
+                cfg.category = category_hint
+            fetch_tasks.append(smart_fetch(r.url, config=cfg))
         fetched = await asyncio.gather(*fetch_tasks, return_exceptions=True)
         for i, fr in enumerate(fetched):
             if isinstance(fr, FetchResult):
@@ -479,3 +550,20 @@ async def search_fetch(
         errors=engine_errors,
         total_results=len(results),
     )
+
+
+def _guess_category_from_snippet(snippet: str, url: str) -> str:
+    lower = (snippet + " " + url).lower()
+    if any(
+        d in url.lower() for d in ("arxiv.org", "openreview.net", "research", "paper")
+    ):
+        return "research_paper"
+    if any(d in url.lower() for d in ("linkedin.com", "crunchbase.com")):
+        return "people"
+    if any(d in url.lower() for d in ("blog.", "/blog/", "medium.com")):
+        return "personal_site"
+    if any(d in url.lower() for d in ("techcrunch", "wired", "reuters", "news")):
+        return "news"
+    if any(d in url.lower() for d in ("company", "startup", "about", "crunchbase")):
+        return "company"
+    return "unknown"

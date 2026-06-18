@@ -21,6 +21,7 @@ from agentfetch.core.searchengine import (
     GOOGLE_CX,
 )
 from agentfetch.core.schema import SearchResult, FetchResult
+import asyncio
 
 
 def test_engine_result_dataclass():
@@ -456,14 +457,195 @@ async def test_search_fetch_graceful_error_on_scrape_failure():
 
 
 @pytest.mark.asyncio
-async def test_search_fetch_returns_engine_errors():
+async def test_generate_query_variations_short_query():
+    from agentfetch.core.searchengine import generate_query_variations
+
+    vars = generate_query_variations("hello world")
+    assert len(vars) >= 1
+    assert "hello world" in vars
+
+
+def test_generate_query_variations_long_query():
+    from agentfetch.core.searchengine import generate_query_variations
+
+    vars = generate_query_variations("how to build a web crawler")
+    assert len(vars) >= 2
+    assert "how to build a web crawler" in vars
+
+
+def test_generate_query_variations_max_four():
+    from agentfetch.core.searchengine import generate_query_variations
+
+    vars = generate_query_variations("a b c d e f g")
+    assert len(vars) <= 4
+
+
+def test_parallel_search_deep_generates_variations():
+    with patch(
+        "agentfetch.core.searchengine._search_ddg", new_callable=AsyncMock
+    ) as mock_ddg:
+        mock_ddg.return_value = [
+            EngineResult(
+                title="A", url="https://a.com", snippet="a", source="duckduckgo"
+            )
+        ]
+        with patch(
+            "agentfetch.core.searchengine._search_google", new_callable=AsyncMock
+        ) as mock_google:
+            mock_google.return_value = []
+            with patch(
+                "agentfetch.core.searchengine._search_bing", new_callable=AsyncMock
+            ) as mock_bing:
+                mock_bing.return_value = []
+                results, engines, errors = asyncio.run(
+                    parallel_search(
+                        "test query with many words",
+                        sources=["duckduckgo"],
+                        max_results=5,
+                        depth="deep",
+                    )
+                )
+                assert len(results) >= 1
+
+
+def test_parallel_search_category_modifier():
+    with patch(
+        "agentfetch.core.searchengine._search_ddg", new_callable=AsyncMock
+    ) as mock_ddg:
+        mock_ddg.return_value = [
+            EngineResult(
+                title="N", url="https://news.com", snippet="news", source="duckduckgo"
+            )
+        ]
+        results, engines, errors = asyncio.run(
+            parallel_search(
+                "test",
+                sources=["duckduckgo"],
+                max_results=5,
+                category="news",
+            )
+        )
+        assert len(results) >= 1
+
+
+def test_parallel_search_category_unknown_no_modifier():
+    with patch(
+        "agentfetch.core.searchengine._search_ddg", new_callable=AsyncMock
+    ) as mock_ddg:
+        mock_ddg.return_value = [
+            EngineResult(
+                title="A", url="https://a.com", snippet="a", source="duckduckgo"
+            )
+        ]
+        results, engines, errors = asyncio.run(
+            parallel_search(
+                "test",
+                sources=["duckduckgo"],
+                max_results=5,
+                category="unknown_category",
+            )
+        )
+        assert len(results) >= 1
+
+
+@pytest.mark.asyncio
+async def test_stream_search_yields_results():
+    with patch(
+        "agentfetch.core.searchengine._search_ddg", new_callable=AsyncMock
+    ) as mock_ddg:
+        mock_ddg.return_value = [
+            EngineResult(
+                title="A", url="https://a.com", snippet="a", source="duckduckgo"
+            )
+        ]
+        with patch(
+            "agentfetch.core.searchengine._search_google", new_callable=AsyncMock
+        ) as mock_google:
+            mock_google.return_value = []
+            with patch(
+                "agentfetch.core.searchengine._search_bing", new_callable=AsyncMock
+            ) as mock_bing:
+                mock_bing.return_value = []
+                from agentfetch.core.searchengine import stream_search
+
+                results = []
+                async for r in stream_search(
+                    "test", sources=["duckduckgo"], max_results=5
+                ):
+                    results.append(r)
+                assert len(results) >= 1
+                assert all(isinstance(r, EngineResult) for r in results)
+
+
+@pytest.mark.asyncio
+async def test_stream_search_deduplicates():
+    with patch(
+        "agentfetch.core.searchengine._search_ddg", new_callable=AsyncMock
+    ) as mock_ddg:
+        mock_ddg.return_value = [
+            EngineResult(
+                title="A",
+                url="https://example.com/page",
+                snippet="a",
+                source="duckduckgo",
+            )
+        ]
+        with patch(
+            "agentfetch.core.searchengine._search_google", new_callable=AsyncMock
+        ) as mock_google:
+            mock_google.return_value = [
+                EngineResult(
+                    title="A",
+                    url="https://example.com/page",
+                    snippet="a",
+                    source="google",
+                )
+            ]
+            with patch(
+                "agentfetch.core.searchengine._search_bing", new_callable=AsyncMock
+            ) as mock_bing:
+                mock_bing.return_value = []
+                from agentfetch.core.searchengine import stream_search
+
+                results = []
+                async for r in stream_search(
+                    "test", sources=["duckduckgo", "google"], max_results=5
+                ):
+                    results.append(r)
+                urls = [r.url for r in results]
+                assert urls.count("https://example.com/page") == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_search_skips_failed_engines():
+    with patch(
+        "agentfetch.core.searchengine._search_ddg", new_callable=AsyncMock
+    ) as mock_ddg:
+        mock_ddg.side_effect = Exception("DDG down")
+        with patch(
+            "agentfetch.core.searchengine._search_bing", new_callable=AsyncMock
+        ) as mock_bing:
+            mock_bing.return_value = [
+                EngineResult(title="B", url="https://b.com", snippet="b", source="bing")
+            ]
+            from agentfetch.core.searchengine import stream_search
+
+            results = []
+            async for r in stream_search(
+                "test", sources=["duckduckgo", "bing"], max_results=5
+            ):
+                results.append(r)
+            assert len(results) >= 1
+
+
+def test_search_fetch_returns_engine_errors():
     with patch("agentfetch.core.searchengine.parallel_search") as mock_ps:
         mock_ps.return_value = (
             [],
             [],
             {"google": "429 rate limited", "bing": "returned zero results"},
         )
-        result = await search_fetch("test", max_results=5, scrape_results=False)
+        result = asyncio.run(search_fetch("test", max_results=5, scrape_results=False))
         assert result.total_results == 0
         assert len(result.results) == 0
         assert "google" in result.errors

@@ -14,6 +14,7 @@ from agentfetch.core.router import (
     _stealth_init_script,
 )
 from agentfetch.core.schema import FetchResult, ScrapeConfig
+from agentfetch.core.router import _memory_cache
 
 
 def test_is_static_url():
@@ -250,6 +251,80 @@ def test_pick_fingerprint_respects_config_viewport():
     custom = {"width": 800, "height": 600}
     fp = _pick_fingerprint(custom)
     assert fp["viewport"] == custom
+
+
+def test_category_routes_defined():
+    from agentfetch.core.router import CATEGORY_ROUTES
+
+    assert "people" in CATEGORY_ROUTES
+    assert "news" in CATEGORY_ROUTES
+    assert "docs" in CATEGORY_ROUTES
+    assert CATEGORY_ROUTES["people"]["engine"] == "browser"
+    assert CATEGORY_ROUTES["docs"]["engine"] == "static"
+
+
+@pytest.mark.asyncio
+async def test_smart_fetch_category_routes_to_browser():
+    _memory_cache.clear()
+    config = ScrapeConfig(category="people")
+    with patch(
+        "agentfetch.core.router._try_curl_cffi", new_callable=AsyncMock
+    ) as mock_tls:
+        mock_tls.return_value = None
+        with patch(
+            "agentfetch.core.router._browser_fetch", new_callable=AsyncMock
+        ) as mock_browser:
+            mock_browser.return_value = FetchResult(
+                url="https://people-category-test.com",
+                content="people page content",
+                title="John Doe",
+                confidence=0.8,
+                render_mode="browser",
+            )
+            result = await smart_fetch(
+                "https://people-category-test.com", config=config
+            )
+            assert result.content == "people page content"
+            assert mock_browser.called
+
+
+@pytest.mark.asyncio
+async def test_smart_fetch_category_docs_uses_static():
+    _memory_cache.clear()
+    config = ScrapeConfig(category="docs")
+    with patch("agentfetch.core.router._static_fetch") as mock_static:
+        mock_static.return_value = (
+            FetchResult(
+                url="https://docs-category-test.com",
+                content="docs content",
+                title="Docs",
+                confidence=0.9,
+                render_mode="static",
+            ),
+            "<html>content</html>",
+        )
+        result = await smart_fetch("https://docs-category-test.com", config=config)
+        assert result.content == "docs content"
+        assert result.render_mode == "static"
+
+
+@pytest.mark.asyncio
+async def test_smart_fetch_category_unknown_defaults_auto():
+    _memory_cache.clear()
+    config = ScrapeConfig(category="unknown_category")
+    with patch("agentfetch.core.router._static_fetch") as mock_static:
+        mock_static.return_value = (
+            FetchResult(
+                url="https://unknown-category-test.com",
+                content="default content",
+                title="Default",
+                confidence=0.9,
+                render_mode="static",
+            ),
+            "<html><body><p>some real content here that will extract nicely and not trigger browser fallback</p></body></html>",
+        )
+        result = await smart_fetch("https://unknown-category-test.com", config=config)
+        assert result.content is not None
 
 
 def test_stealth_init_script_contains_key_definitions():

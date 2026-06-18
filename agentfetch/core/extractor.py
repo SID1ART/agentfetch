@@ -1,13 +1,98 @@
 import re
 import logging
+import json
 from urllib.parse import urlparse
 from typing import Optional
+from collections import Counter
 
 from markdownify import markdownify as md
 
 from .schema import ScrapeConfig
 
 logger = logging.getLogger("agentfetch.extractor")
+
+_HIGHLIGHT_SENTENCES = 5
+
+
+def _score_sentence(sent: str, word_freq: Counter) -> float:
+    words = re.findall(r"\w+", sent.lower())
+    if not words:
+        return 0.0
+    return sum(word_freq.get(w, 0) for w in words) / len(words)
+
+
+def extract_highlights(
+    text: str, max_sentences: int = _HIGHLIGHT_SENTENCES
+) -> list[str]:
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    if len(sentences) <= max_sentences:
+        return [s.strip() for s in sentences if len(s.strip()) > 20]
+
+    words = re.findall(r"\w+", text.lower())
+    word_freq = Counter(words)
+    scored = [(i, _score_sentence(s, word_freq), s) for i, s in enumerate(sentences)]
+    top = sorted(scored, key=lambda x: -x[1])[:max_sentences]
+    top.sort(key=lambda x: x[0])
+    return [s.strip() for _, _, s in top]
+
+
+def _resolve_field_schema(field_schema):
+    if isinstance(field_schema, str):
+        return {"type": "string", "description": field_schema}
+    return field_schema
+
+
+def extract_by_schema(text: str, schema: dict) -> dict:
+    result = {}
+    props = schema.get("properties", {}) if schema.get("type") == "object" else schema
+    if isinstance(props, dict):
+        for field_name, field_schema in props.items():
+            field_schema = _resolve_field_schema(field_schema)
+            field_type = field_schema.get("type", "string")
+            description = field_schema.get("description", "")
+            lines = text.split("\n")
+            candidates = []
+            for line in lines:
+                line = line.strip()
+                if not line or len(line) > 200:
+                    continue
+                lower = line.lower()
+                if description and description.lower() in lower:
+                    candidates.append(line)
+                if field_name.lower().replace("_", " ") in lower:
+                    candidates.append(line)
+            if candidates:
+                best = max(candidates, key=len)
+                if field_type == "string":
+                    result[field_name] = best
+                elif field_type in ("number", "integer"):
+                    nums = re.findall(
+                        r"[\d,]+(?:\.\d+)?",
+                        best.replace("$", "").replace("€", "").replace("£", ""),
+                    )
+                    if nums:
+                        raw = nums[0].replace(",", "")
+                        result[field_name] = (
+                            int(raw) if field_type == "integer" else float(raw)
+                        )
+                elif field_type == "boolean":
+                    val = (
+                        best.split(":", 1)[-1].split("=", 1)[-1].strip()
+                        if ":" in best or "=" in best
+                        else best
+                    )
+                    result[field_name] = val.lower() in ("true", "yes", "1", "y")
+            else:
+                result[field_name] = None
+    return result
+
+
+def extract_structured(text: str, schema: dict) -> Optional[dict]:
+    try:
+        return extract_by_schema(text, schema)
+    except Exception as e:
+        logger.warning("Structured extraction failed: %s", e)
+        return None
 
 
 def extract_content(

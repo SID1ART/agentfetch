@@ -16,6 +16,9 @@ class ScrapeConfig(BaseModel):
     headers: Optional[dict[str, str]] = None
     ja3: Optional[str] = None
     stealth: bool = True
+    category: str = "auto"
+    extract_highlights: bool = False
+    output_schema: Optional[dict] = None
 
 
 class FetchResult(BaseModel):
@@ -37,6 +40,8 @@ class FetchResult(BaseModel):
     citations: Optional[list[str]] = None
     robots_allowed: bool = True
     proxy_used: Optional[str] = None
+    highlights: Optional[list[str]] = None
+    structured_output: Optional[dict] = None
 
 
 class CrawlResult(BaseModel):
@@ -56,6 +61,8 @@ class SearchConfig(BaseModel):
     scrape_results: bool = True
     searxng_url: str = ""
     proxy: Optional[str] = None
+    category: str = "auto"
+    depth: str = "auto"
 
 
 class SearchResult(BaseModel):

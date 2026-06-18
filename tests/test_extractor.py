@@ -104,3 +104,124 @@ def test_add_citation_markers_no_urls():
     result, urls = _add_citation_markers(text)
     assert len(urls) == 0
     assert result == text
+
+
+def test_extract_highlights_returns_top_sentences():
+    from agentfetch.core.extractor import extract_highlights
+
+    text = (
+        "Python is a programming language. "
+        "It is widely used for data science. "
+        "Many companies rely on Python. "
+        "The syntax is clear and readable. "
+        "Python has a large ecosystem of libraries. "
+    )
+    highlights = extract_highlights(text, max_sentences=3)
+    assert len(highlights) <= 3
+    assert all(len(h.strip()) > 20 for h in highlights)
+
+
+def test_extract_highlights_returns_all_when_short():
+    from agentfetch.core.extractor import extract_highlights
+
+    text = "Short text. Not enough sentences. For highlights."
+    highlights = extract_highlights(text, max_sentences=5)
+    assert len(highlights) >= 1
+
+
+def test_extract_highlights_respects_max_sentences():
+    from agentfetch.core.extractor import extract_highlights
+
+    text = (
+        "First important sentence about the topic. " * 2
+        + "Second key insight for testing purposes. " * 2
+        + "Third interesting detail worth keeping."
+    )
+    highlights = extract_highlights(text, max_sentences=2)
+    assert len(highlights) <= 2
+
+
+def test_extract_structured_string_field():
+    from agentfetch.core.extractor import extract_structured
+
+    text = "Company: Acme Corp\nLocation: New York\nFounded: 2020"
+    schema = {
+        "type": "object",
+        "properties": {
+            "company": {"type": "string", "description": "Company"},
+            "location": {"type": "string", "description": "Location"},
+        },
+    }
+    result = extract_structured(text, schema)
+    assert result is not None
+    assert result["company"] is not None
+    assert result["location"] is not None
+
+
+def test_extract_structured_numeric_field():
+    from agentfetch.core.extractor import extract_structured
+
+    text = "Revenue: $1,234,567\nEmployees: 500"
+    schema = {
+        "type": "object",
+        "properties": {
+            "revenue": {"type": "number", "description": "Revenue"},
+            "employees": {"type": "integer", "description": "Employees"},
+        },
+    }
+    result = extract_structured(text, schema)
+    assert result is not None
+    assert result["revenue"] == 1234567
+    assert result["employees"] == 500
+
+
+def test_extract_structured_boolean_field():
+    from agentfetch.core.extractor import extract_structured
+
+    text = "Public: True\nProfitable: yes"
+    schema = {
+        "type": "object",
+        "properties": {
+            "public": {"type": "boolean", "description": "Public"},
+            "profitable": {"type": "boolean", "description": "Profitable"},
+        },
+    }
+    result = extract_structured(text, schema)
+    assert result is not None
+    assert result["public"] is True
+    assert result["profitable"] is True
+
+
+def test_extract_structured_returns_none_for_missing_fields():
+    from agentfetch.core.extractor import extract_structured
+
+    text = "Some unrelated content here"
+    schema = {
+        "type": "object",
+        "properties": {
+            "company": {"type": "string", "description": "Company name"},
+        },
+    }
+    result = extract_structured(text, schema)
+    assert result is not None
+    assert result["company"] is None
+
+
+def test_extract_structured_empty_schema():
+    from agentfetch.core.extractor import extract_structured
+
+    result = extract_structured("Some text", {})
+    assert result == {}
+
+
+def test_extract_structured_nested_properties():
+    from agentfetch.core.extractor import extract_by_schema
+
+    text = "CEO: John Doe\nCTO: Jane Smith"
+    schema = {
+        "CEO": "Chief Executive Officer",
+        "CTO": "Chief Technology Officer",
+    }
+    result = extract_by_schema(text, schema)
+    assert "CEO" in result
+    assert "CTO" in result

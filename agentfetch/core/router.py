@@ -12,7 +12,12 @@ from typing import Optional
 import httpx
 
 from .schema import FetchResult, ScrapeConfig
-from .extractor import extract_content, detect_content_type
+from .extractor import (
+    extract_content,
+    detect_content_type,
+    extract_highlights,
+    extract_structured,
+)
 from .sanitizer import sanitize
 from .normalizer import normalize_url, extract_domain
 from .robotstxt import RobotsChecker
@@ -358,6 +363,16 @@ async def _fetch_with_retry(
     raise Exception(last_error)
 
 
+def _apply_post_extraction(result: FetchResult, config: ScrapeConfig):
+    if config.extract_highlights:
+        result.highlights = extract_highlights(result.content)
+    if config.output_schema:
+        result.structured_output = extract_structured(
+            result.content, config.output_schema
+        )
+    return result
+
+
 async def _static_fetch(
     url: str,
     config: Optional[ScrapeConfig] = None,
@@ -387,7 +402,7 @@ async def _static_fetch(
     latency = int((time.monotonic() - start) * 1000)
     wc = len(text.split())
     links = _extract_links(html) if config.scrape_links else None
-    return FetchResult(
+    result = FetchResult(
         url=url,
         content=text,
         title=title,
@@ -402,7 +417,8 @@ async def _static_fetch(
         normalized_url=normalize_url(url),
         citations=citations if config.citation_links else None,
         proxy_used=proxy_used,
-    ), html
+    )
+    return result, html
 
 
 async def _cloudflare_fetch(url: str, ja3: Optional[str] = None) -> Optional[str]:
@@ -464,12 +480,6 @@ async def _try_cloudflare(
     return result
 
 
-STEALTH_ENABLED = os.environ.get("AGENTFETCH_STEALTH", "true").lower() == "true"
-STEALTH_BASIC_FALLBACK = (
-    os.environ.get("AGENTFETCH_STEALTH_BASIC_FALLBACK", "true").lower() == "true"
-)
-
-
 async def _try_curl_cffi(
     url: str,
     config: Optional[ScrapeConfig] = None,
@@ -523,6 +533,12 @@ async def _try_curl_cffi(
         if q_error:
             result.error = (result.error + "; " if result.error else "") + q_error
     return result
+
+
+STEALTH_ENABLED = os.environ.get("AGENTFETCH_STEALTH", "true").lower() == "true"
+STEALTH_BASIC_FALLBACK = (
+    os.environ.get("AGENTFETCH_STEALTH_BASIC_FALLBACK", "true").lower() == "true"
+)
 
 
 FINGERPRINT_PROFILES = [
@@ -683,7 +699,7 @@ async def _browser_fetch(
         confidence -= 0.3
     confidence = max(0.1, confidence)
 
-    return FetchResult(
+    result = FetchResult(
         url=url,
         content=text,
         title=title,
@@ -697,6 +713,7 @@ async def _browser_fetch(
         normalized_url=normalize_url(url),
         citations=citations if (config and config.citation_links) else None,
     )
+    return result
 
 
 def _extract_title(html: str) -> Optional[str]:
@@ -726,6 +743,20 @@ def _is_cloudflare(html: str) -> bool:
     return any(c in html.lower() for c in checks)
 
 
+CATEGORY_ROUTES = {
+    "article": {"engine": "auto", "confidence_floor": 0.5},
+    "news": {"engine": "auto", "confidence_floor": 0.4},
+    "company": {"engine": "auto", "confidence_floor": 0.3},
+    "people": {"engine": "browser", "confidence_floor": 0.2},
+    "research_paper": {"engine": "auto", "confidence_floor": 0.4},
+    "personal_site": {"engine": "auto", "confidence_floor": 0.4},
+    "docs": {"engine": "static", "confidence_floor": 0.6},
+    "product": {"engine": "auto", "confidence_floor": 0.3},
+    "listing": {"engine": "static", "confidence_floor": 0.3},
+    "financial_report": {"engine": "auto", "confidence_floor": 0.4},
+}
+
+
 async def smart_fetch(
     url: str,
     engine: str = "auto",
@@ -737,6 +768,12 @@ async def smart_fetch(
     raw_url = url
     url = normalize_url(url)
     config = config or ScrapeConfig()
+    confidence_floor = 0.0
+    if config.category != "auto" and config.category in CATEGORY_ROUTES:
+        route = CATEGORY_ROUTES[config.category]
+        if engine == "auto":
+            engine = route.get("engine", "auto")
+        confidence_floor = route.get("confidence_floor", 0.0)
 
     if use_cache:
         cached = _memory_cache.get(url)
@@ -764,30 +801,30 @@ async def smart_fetch(
         tls_result = await _try_curl_cffi(url, config)
         if tls_result and tls_result.content:
             tls_result.render_mode = "bypass"
-            _quality_and_cache(url, tls_result)
+            _quality_and_cache(url, tls_result, confidence_floor=confidence_floor)
             return tls_result
         stealth_result = await _browser_fetch(url, config)
         if not stealth_result.content and config.stealth and STEALTH_BASIC_FALLBACK:
             basic_config = config.model_copy(update={"stealth": False})
             logger.info("Stealth browser failed for %s, trying basic browser", url)
             basic_result = await _browser_fetch(url, basic_config)
-            _quality_and_cache(url, basic_result)
+            _quality_and_cache(url, basic_result, confidence_floor=confidence_floor)
             return basic_result
-        _quality_and_cache(url, stealth_result)
+        _quality_and_cache(url, stealth_result, confidence_floor=confidence_floor)
         return stealth_result
 
     if _is_static_url(url):
         result, _ = await _static_fetch(url, config)
         result.render_mode = "static"
         if use_cache:
-            _quality_and_cache(url, result)
+            _quality_and_cache(url, result, confidence_floor=confidence_floor)
         return result
 
     result, html = await _static_fetch(url, config)
 
     if engine == "static":
         if use_cache:
-            _quality_and_cache(url, result)
+            _quality_and_cache(url, result, confidence_floor=confidence_floor)
         return result
 
     is_403 = result.error and (
@@ -795,12 +832,12 @@ async def smart_fetch(
     )
     if result.error and not is_403:
         if use_cache:
-            _quality_and_cache(url, result)
+            _quality_and_cache(url, result, confidence_floor=confidence_floor)
         return result
 
     if not html:
         if use_cache:
-            _quality_and_cache(url, result)
+            _quality_and_cache(url, result, confidence_floor=confidence_floor)
         return result
 
     if _is_cloudflare(html):
@@ -808,7 +845,7 @@ async def smart_fetch(
         cf_result = await _try_cloudflare(url, config)
         if cf_result and cf_result.content:
             cf_result.render_mode = "static"
-            _quality_and_cache(url, cf_result)
+            _quality_and_cache(url, cf_result, confidence_floor=confidence_floor)
             return cf_result
         logger.info(
             "Cloudflare bypass failed for %s, falling through to TLS fallback", url
@@ -821,7 +858,83 @@ async def smart_fetch(
         tls_result = await _try_curl_cffi(url, config)
         if tls_result and tls_result.content:
             tls_result.render_mode = "bypass"
-            _quality_and_cache(url, tls_result)
+            _quality_and_cache(
+                url, tls_result, confidence_floor=confidence_floor, config=config
+            )
+            return tls_result
+        stealth_result = await _browser_fetch(url, config)
+        if not stealth_result.content and config.stealth and STEALTH_BASIC_FALLBACK:
+            basic_config = config.model_copy(update={"stealth": False})
+            logger.info("Stealth browser failed for %s, trying basic browser", url)
+            basic_result = await _browser_fetch(url, basic_config)
+
+            _quality_and_cache(
+                url, basic_result, confidence_floor=confidence_floor, config=config
+            )
+            return basic_result
+        _quality_and_cache(
+            url, stealth_result, confidence_floor=confidence_floor, config=config
+        )
+        return stealth_result
+
+    if _is_static_url(url):
+        result, _ = await _static_fetch(url, config)
+        result.render_mode = "static"
+        if use_cache:
+            _quality_and_cache(
+                url, result, confidence_floor=confidence_floor, config=config
+            )
+        return result
+
+    result, html = await _static_fetch(url, config)
+
+    if engine == "static":
+        if use_cache:
+            _quality_and_cache(
+                url, result, confidence_floor=confidence_floor, config=config
+            )
+        return result
+
+    is_403 = result.error and (
+        "403" in result.error or "forbidden" in result.error.lower()
+    )
+    if result.error and not is_403:
+        if use_cache:
+            _quality_and_cache(
+                url, result, confidence_floor=confidence_floor, config=config
+            )
+        return result
+
+    if not html:
+        if use_cache:
+            _quality_and_cache(
+                url, result, confidence_floor=confidence_floor, config=config
+            )
+        return result
+
+    if _is_cloudflare(html):
+        logger.info("Cloudflare detected for %s, trying bypass", url)
+        cf_result = await _try_cloudflare(url, config)
+        if cf_result and cf_result.content:
+            cf_result.render_mode = "static"
+            _quality_and_cache(
+                url, cf_result, confidence_floor=confidence_floor, config=config
+            )
+            return cf_result
+        logger.info(
+            "Cloudflare bypass failed for %s, falling through to TLS fallback", url
+        )
+
+    text, _, _ = extract_content(html, url, config)
+    needs_browser, reasons = _needs_browser(html, text)
+
+    if needs_browser or is_403:
+        tls_result = await _try_curl_cffi(url, config)
+        if tls_result and tls_result.content:
+            tls_result.render_mode = "bypass"
+            _quality_and_cache(
+                url, tls_result, confidence_floor=confidence_floor, config=config
+            )
             return tls_result
         logger.info("curl_cffi TLS fallback failed for %s, trying browser", url)
         stealth_result = await _browser_fetch(url, config)
@@ -829,12 +942,17 @@ async def smart_fetch(
             basic_config = config.model_copy(update={"stealth": False})
             logger.info("Stealth browser failed for %s, trying basic browser", url)
             basic_result = await _browser_fetch(url, basic_config)
-            _quality_and_cache(url, basic_result)
+
+            _quality_and_cache(
+                url, basic_result, confidence_floor=confidence_floor, config=config
+            )
             return basic_result
-        _quality_and_cache(url, stealth_result)
+        _quality_and_cache(
+            url, stealth_result, confidence_floor=confidence_floor, config=config
+        )
         return stealth_result
 
-    _quality_and_cache(url, result)
+    _quality_and_cache(url, result, confidence_floor=confidence_floor, config=config)
     return result
 
 
@@ -854,10 +972,19 @@ async def batch_fetch(
     return await asyncio.gather(*tasks)
 
 
-def _quality_and_cache(url: str, result: FetchResult):
+def _quality_and_cache(
+    url: str,
+    result: FetchResult,
+    confidence_floor: float = 0.0,
+    config: Optional[ScrapeConfig] = None,
+):
+    if config:
+        _apply_post_extraction(result, config)
     q_confidence, q_error = _validate_content(result.content)
     if q_confidence < result.confidence:
         result.confidence = q_confidence
         if q_error:
             result.error = (result.error + "; " if result.error else "") + q_error
+    if confidence_floor > 0 and result.confidence < confidence_floor:
+        result.confidence = confidence_floor
     _memory_cache.put(url, result)
