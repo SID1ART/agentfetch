@@ -22,6 +22,7 @@ from ..core.schema import (
 from ..core.stopper import CrawlStopper
 from ..core.robotstxt import RobotsChecker
 from ..core.job_queue import JobQueue
+from ..core.crawl_store import CrawlStore
 
 logger = logging.getLogger("agentfetch.api.routes")
 router = APIRouter()
@@ -45,6 +46,7 @@ if REDIS_URL:
         logger.warning("Redis not available: %s", e)
 
 _crawl_jobs: dict[str, CrawlResult] = {}
+_crawl_store = CrawlStore()
 
 
 class ScrapeRequest(BaseModel):
@@ -156,6 +158,7 @@ async def agent_crawl(
 
     result = CrawlResult(job_id=job_id, status="pending")
     _crawl_jobs[job_id] = result
+    _crawl_store.store(job_id, result)
     background_tasks.add_task(_run_crawl, job_id, req)
     return result
 
@@ -271,7 +274,14 @@ async def agent_status(job_id: str) -> CrawlResult:
         cached = await JobQueue.get_crawl_result(job_id)
         if cached:
             return cached
-    return _crawl_jobs.get(job_id, CrawlResult(job_id=job_id, status="failed"))
+    in_mem = _crawl_jobs.get(job_id)
+    if in_mem:
+        return in_mem
+    stored = _crawl_store.get(job_id)
+    if stored:
+        _crawl_jobs[job_id] = stored
+        return stored
+    return CrawlResult(job_id=job_id, status="failed")
 
 
 @router.get("/health")
@@ -309,7 +319,12 @@ async def _run_crawl(job_id: str, req: CrawlRequest):
     from bs4 import BeautifulSoup
     from urllib.parse import urljoin
 
-    result = _crawl_jobs[job_id]
+    result = _crawl_jobs.get(job_id)
+    if result is None:
+        result = _crawl_store.get(job_id)
+    if result is None:
+        result = CrawlResult(job_id=job_id, status="pending")
+        _crawl_jobs[job_id] = result
     result.status = "running"
 
     robots = RobotsChecker()
@@ -348,6 +363,7 @@ async def _run_crawl(job_id: str, req: CrawlRequest):
             result.pages = pages
             result.total_pages = len(pages)
             result.unique_pages = len(pages)
+            _crawl_store.store(job_id, result)
 
             stop, reason = stopper.should_stop()
             result.stopped_reason = reason
@@ -355,6 +371,7 @@ async def _run_crawl(job_id: str, req: CrawlRequest):
                 result.status = "complete"
                 result.duplicates_skipped = stopper.duplicates_skipped
                 await JobQueue.store_crawl_result(job_id, result)
+                _crawl_store.store(job_id, result)
                 return
         else:
             result.duplicates_skipped = stopper.duplicates_skipped
@@ -378,4 +395,5 @@ async def _run_crawl(job_id: str, req: CrawlRequest):
 
     result.status = "complete"
     result.duplicates_skipped = stopper.duplicates_skipped
+    _crawl_store.store(job_id, result)
     await JobQueue.store_crawl_result(job_id, result)
