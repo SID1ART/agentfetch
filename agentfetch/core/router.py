@@ -551,7 +551,17 @@ async def _browser_fetch(
     config = config or ScrapeConfig()
     try:
         from playwright.async_api import async_playwright
-
+    except ImportError:
+        return FetchResult(
+            url=url,
+            content="",
+            confidence=0.0,
+            error="Playwright not installed. Install with: pip install agentfetch[browser]",
+            latency_ms=int((time.monotonic() - start) * 1000),
+            render_mode="browser",
+            normalized_url=normalize_url(url),
+        )
+    try:
         cookies = config.cookies or _load_cookies()
         fp = _pick_fingerprint(config.viewport)
         ua = random.choice(USER_AGENTS)
