@@ -5,6 +5,7 @@ import os
 import random
 import re
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 
@@ -25,6 +26,86 @@ COOKIES_FILE = os.environ.get("AGENTFETCH_COOKIES_FILE", "")
 MAX_RETRIES = int(os.environ.get("AGENTFETCH_MAX_RETRIES", "2"))
 DOMAIN_DELAY = float(os.environ.get("AGENTFETCH_DOMAIN_DELAY", "0.5"))
 ROBOTS_CHECK = os.environ.get("AGENTFETCH_ROBOTS_CHECK", "false").lower() == "true"
+CACHE_SIZE = int(os.environ.get("AGENTFETCH_CACHE_SIZE", "100"))
+CACHE_TTL = int(os.environ.get("AGENTFETCH_CACHE_TTL", "300"))
+
+SPA_SHELL_PATTERNS = [
+    "Loading...",
+    "Please enable JavaScript",
+    "You need to enable JavaScript",
+    "enable JavaScript",
+    "We're sorry",
+]
+
+MIN_PROSE_RATIO = float(os.environ.get("AGENTFETCH_MIN_PROSE_RATIO", "0.4"))
+MIN_WORDS = int(os.environ.get("AGENTFETCH_MIN_WORDS", "10"))
+
+
+class MemoryCache:
+    def __init__(self, maxsize: int = 100, ttl: float = 300):
+        self._maxsize = maxsize
+        self._ttl = ttl
+        self._store: OrderedDict[str, tuple[float, FetchResult]] = OrderedDict()
+
+    def get(self, key: str) -> Optional[FetchResult]:
+        if key not in self._store:
+            return None
+        ts, result = self._store[key]
+        if time.monotonic() - ts > self._ttl:
+            del self._store[key]
+            return None
+        self._store.move_to_end(key)
+        return result
+
+    def put(self, key: str, result: FetchResult):
+        if key in self._store:
+            self._store.move_to_end(key)
+        self._store[key] = (time.monotonic(), result)
+        while len(self._store) > self._maxsize:
+            self._store.popitem(last=False)
+
+    def clear(self):
+        self._store.clear()
+
+
+_memory_cache = MemoryCache(maxsize=CACHE_SIZE, ttl=CACHE_TTL)
+
+
+def _validate_content(text: str) -> tuple[float, Optional[str]]:
+    if not text or not text.strip():
+        return 0.0, "extraction returned empty content"
+
+    stripped = text.strip()
+    words = stripped.split()
+    text_lower = stripped.lower()
+
+    reasons: list[str] = []
+
+    for pattern in SPA_SHELL_PATTERNS:
+        if pattern.lower() in text_lower:
+            reasons.append(f"SPA shell text: '{pattern}'")
+            break
+
+    alpha_chars = sum(c.isalpha() for c in stripped)
+    total_chars = len(stripped)
+    prose_ratio = alpha_chars / max(total_chars, 1)
+    if prose_ratio < MIN_PROSE_RATIO:
+        reasons.append(f"low prose ratio ({prose_ratio:.2f})")
+
+    if len(words) < MIN_WORDS:
+        reasons.append(f"too few words ({len(words)})")
+
+    sentence_endings = sum(1 for c in stripped if c in ".!?")
+    if words and sentence_endings / max(len(words), 1) < 0.005 and len(words) > 20:
+        reasons.append("no sentence structure")
+
+    if not reasons:
+        return 1.0, None
+
+    penalty = min(len(reasons) * 0.25, 0.75)
+    confidence = max(0.1, 1.0 - penalty)
+    return confidence, "; ".join(reasons)
+
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -464,6 +545,12 @@ async def smart_fetch(
     url = normalize_url(url)
     config = config or ScrapeConfig()
 
+    if use_cache:
+        cached = _memory_cache.get(url)
+        if cached is not None:
+            cached.cached = True
+            return cached
+
     if cookies:
         config.cookies = cookies
 
@@ -483,6 +570,8 @@ async def smart_fetch(
     if _is_static_url(url):
         result, _ = await _static_fetch(url, config)
         result.render_mode = "static"
+        if use_cache:
+            _quality_and_cache(url, result)
         return result
 
     result, html = await _static_fetch(url, config)
@@ -490,9 +579,13 @@ async def smart_fetch(
         "403" in result.error or "forbidden" in result.error.lower()
     )
     if result.error and not is_403:
+        if use_cache:
+            _quality_and_cache(url, result)
         return result
 
     if not html:
+        if use_cache:
+            _quality_and_cache(url, result)
         return result
 
     if _is_cloudflare(html):
@@ -500,6 +593,7 @@ async def smart_fetch(
         cf_result = await _try_cloudflare(url, config)
         if cf_result and cf_result.content:
             cf_result.render_mode = "static"
+            _quality_and_cache(url, cf_result)
             return cf_result
         logger.info("Cloudflare bypass failed for %s, falling through to browser", url)
 
@@ -507,8 +601,11 @@ async def smart_fetch(
     needs_browser, reasons = _needs_browser(html, text)
 
     if engine == "browser" or needs_browser or (result.error and is_403):
-        return await _browser_fetch(url, config)
+        browser_result = await _browser_fetch(url, config)
+        _quality_and_cache(url, browser_result)
+        return browser_result
 
+    _quality_and_cache(url, result)
     return result
 
 
@@ -526,3 +623,12 @@ async def batch_fetch(
 
     tasks = [_fetch_one(url) for url in normalized]
     return await asyncio.gather(*tasks)
+
+
+def _quality_and_cache(url: str, result: FetchResult):
+    q_confidence, q_error = _validate_content(result.content)
+    if q_confidence < result.confidence:
+        result.confidence = q_confidence
+        if q_error:
+            result.error = (result.error + "; " if result.error else "") + q_error
+    _memory_cache.put(url, result)
