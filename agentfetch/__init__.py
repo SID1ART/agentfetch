@@ -3,6 +3,8 @@ from .core.searchengine import (
     parallel_search,
     search_fetch,
     stream_search,
+    generate_query_variations,
+    EngineResult,
     _configure_searxng,
 )
 from .core.schema import (
@@ -38,4 +40,6 @@ __all__ = [
     "detect_content_type",
     "extract_highlights",
     "extract_structured",
+    "generate_query_variations",
+    "EngineResult",
 ]

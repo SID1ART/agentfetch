@@ -4,6 +4,7 @@ from .searchengine import (
     parallel_search,
     search_fetch,
     stream_search,
+    generate_query_variations,
     EngineResult,
     _configure_searxng,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "search_fetch",
     "stream_search",
     "EngineResult",
+    "generate_query_variations",
     "extract_content",
     "detect_content_type",
     "extract_highlights",
