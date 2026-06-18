@@ -401,7 +401,7 @@ async def _try_cloudflare(
     content_type = detect_content_type(html, url)
     title = _extract_title(html)
     links = _extract_links(html) if config.scrape_links else None
-    return FetchResult(
+    result = FetchResult(
         url=url,
         content=text,
         title=title,
@@ -414,9 +414,133 @@ async def _try_cloudflare(
         normalized_url=normalize_url(url),
         citations=citations if (config and config.citation_links) else None,
     )
+    q_confidence, q_error = _validate_content(result.content)
+    if q_confidence < result.confidence:
+        result.confidence = q_confidence
+        if q_error:
+            result.error = (result.error + "; " if result.error else "") + q_error
+    return result
 
 
 STEALTH_ENABLED = os.environ.get("AGENTFETCH_STEALTH", "true").lower() == "true"
+STEALTH_BASIC_FALLBACK = (
+    os.environ.get("AGENTFETCH_STEALTH_BASIC_FALLBACK", "true").lower() == "true"
+)
+
+
+async def _try_curl_cffi(
+    url: str,
+    config: Optional[ScrapeConfig] = None,
+) -> Optional[FetchResult]:
+    config = config or ScrapeConfig()
+    try:
+        from curl_cffi.requests import AsyncSession
+
+        profile = (
+            config.ja3
+            or os.environ.get("AGENTFETCH_JA3_PROFILE", "")
+            or random.choice(CURL_CFFI_PROFILES)
+        )
+        async with AsyncSession(impersonate=profile) as session:
+            resp = await session.get(
+                url, headers=_get_headers(config.headers), timeout=STATIC_TIMEOUT
+            )
+            html = resp.text
+    except ImportError:
+        return None
+    except Exception as e:
+        logger.debug("curl_cffi TLS fallback failed for %s: %s", url, e)
+        return None
+
+    if not html:
+        return None
+
+    text, extractor, citations = extract_content(html, url, config)
+    text, injection_detected = sanitize(text, url)
+    if not text:
+        return None
+    content_type = detect_content_type(html, url)
+    title = _extract_title(html)
+    links = _extract_links(html) if config.scrape_links else None
+    result = FetchResult(
+        url=url,
+        content=text,
+        title=title,
+        confidence=0.8,
+        content_type=content_type,
+        word_count=len(text.split()),
+        render_mode="bypass",
+        injection_detected=injection_detected,
+        links=links,
+        normalized_url=normalize_url(url),
+        citations=citations if config.citation_links else None,
+    )
+    q_confidence, q_error = _validate_content(result.content)
+    if q_confidence < result.confidence:
+        result.confidence = q_confidence
+        if q_error:
+            result.error = (result.error + "; " if result.error else "") + q_error
+    return result
+
+
+FINGERPRINT_PROFILES = [
+    {
+        "viewport": {"width": 1920, "height": 1080},
+        "locale": "en-US",
+        "timezone_id": "America/New_York",
+    },
+    {
+        "viewport": {"width": 1536, "height": 864},
+        "locale": "en-US",
+        "timezone_id": "America/Chicago",
+    },
+    {
+        "viewport": {"width": 1440, "height": 900},
+        "locale": "en-GB",
+        "timezone_id": "Europe/London",
+    },
+    {
+        "viewport": {"width": 1512, "height": 982},
+        "locale": "en-CA",
+        "timezone_id": "America/Toronto",
+    },
+    {
+        "viewport": {"width": 1920, "height": 1080},
+        "locale": "en-US",
+        "timezone_id": "America/Los_Angeles",
+    },
+    {
+        "viewport": {"width": 1366, "height": 768},
+        "locale": "en-AU",
+        "timezone_id": "Australia/Sydney",
+    },
+    {
+        "viewport": {"width": 2560, "height": 1440},
+        "locale": "en-US",
+        "timezone_id": "America/New_York",
+    },
+    {
+        "viewport": {"width": 1280, "height": 720},
+        "locale": "en-IN",
+        "timezone_id": "Asia/Kolkata",
+    },
+]
+
+
+def _pick_fingerprint(config_viewport: Optional[dict] = None) -> dict:
+    profile = random.choice(FINGERPRINT_PROFILES).copy()
+    if config_viewport:
+        profile["viewport"] = config_viewport
+    return profile
+
+
+def _stealth_init_script() -> str:
+    return """
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+    window.chrome = { runtime: {} };
+    """
 
 
 async def _browser_fetch(
@@ -429,7 +553,8 @@ async def _browser_fetch(
         from playwright.async_api import async_playwright
 
         cookies = config.cookies or _load_cookies()
-        viewport = config.viewport or {"width": 1920, "height": 1080}
+        fp = _pick_fingerprint(config.viewport)
+        ua = random.choice(USER_AGENTS)
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(
@@ -441,11 +566,13 @@ async def _browser_fetch(
                 ],
             )
             context = await browser.new_context(
-                user_agent=random.choice(USER_AGENTS),
-                viewport=viewport,
-                locale="en-US",
-                timezone_id="America/New_York",
+                user_agent=ua,
+                viewport=fp["viewport"],
+                locale=fp["locale"],
+                timezone_id=fp["timezone_id"],
             )
+
+            await context.add_init_script(_stealth_init_script())
 
             if config.stealth and STEALTH_ENABLED:
                 try:
@@ -609,15 +736,29 @@ async def smart_fetch(
             cf_result.render_mode = "static"
             _quality_and_cache(url, cf_result)
             return cf_result
-        logger.info("Cloudflare bypass failed for %s, falling through to browser", url)
+        logger.info(
+            "Cloudflare bypass failed for %s, falling through to TLS fallback", url
+        )
 
     text, _, _ = extract_content(html, url, config)
     needs_browser, reasons = _needs_browser(html, text)
 
     if engine == "browser" or needs_browser or (result.error and is_403):
-        browser_result = await _browser_fetch(url, config)
-        _quality_and_cache(url, browser_result)
-        return browser_result
+        tls_result = await _try_curl_cffi(url, config)
+        if tls_result and tls_result.content:
+            tls_result.render_mode = "bypass"
+            _quality_and_cache(url, tls_result)
+            return tls_result
+        logger.info("curl_cffi TLS fallback failed for %s, trying browser", url)
+        stealth_result = await _browser_fetch(url, config)
+        if not stealth_result.content and config.stealth and STEALTH_BASIC_FALLBACK:
+            basic_config = config.model_copy(update={"stealth": False})
+            logger.info("Stealth browser failed for %s, trying basic browser", url)
+            basic_result = await _browser_fetch(url, basic_config)
+            _quality_and_cache(url, basic_result)
+            return basic_result
+        _quality_and_cache(url, stealth_result)
+        return stealth_result
 
     _quality_and_cache(url, result)
     return result

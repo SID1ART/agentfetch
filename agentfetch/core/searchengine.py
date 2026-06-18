@@ -14,6 +14,10 @@ from .router import smart_fetch
 logger = logging.getLogger("agentfetch.searchengine")
 
 SEARXNG_URL = os.environ.get("SEARXNG_URL", "")
+BRAVE_SEARCH_API_KEY = os.environ.get("BRAVE_SEARCH_API_KEY", "")
+SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+GOOGLE_CX = os.environ.get("GOOGLE_CX", "")
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -62,7 +66,104 @@ async def _search_ddg(query: str, max_results: int) -> list[EngineResult]:
         return []
 
 
+async def _search_brave_api(query: str, max_results: int) -> list[EngineResult]:
+    if not BRAVE_SEARCH_API_KEY:
+        return []
+    try:
+        url = "https://api.search.brave.com/res/v1/web/search"
+        headers = {
+            "X-Subscription-Token": BRAVE_SEARCH_API_KEY,
+            "Accept": "application/json",
+        }
+        params = {"q": query, "count": min(max_results, 20)}
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=headers, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+        results = []
+        for item in data.get("web", {}).get("results", [])[:max_results]:
+            results.append(
+                EngineResult(
+                    title=item.get("title", ""),
+                    url=item.get("url", ""),
+                    snippet=item.get("description", ""),
+                    source="brave",
+                )
+            )
+        return results
+    except Exception as e:
+        logger.warning("Brave Search API failed: %s", e)
+        return []
+
+
+async def _search_serpapi(query: str, max_results: int) -> list[EngineResult]:
+    if not SERPAPI_KEY:
+        return []
+    try:
+        url = "https://serpapi.com/search"
+        params = {
+            "q": query,
+            "api_key": SERPAPI_KEY,
+            "engine": "google",
+            "num": min(max_results, 10),
+        }
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+        results = []
+        for item in data.get("organic_results", [])[:max_results]:
+            results.append(
+                EngineResult(
+                    title=item.get("title", ""),
+                    url=item.get("link", ""),
+                    snippet=item.get("snippet", ""),
+                    source="serpapi",
+                )
+            )
+        return results
+    except Exception as e:
+        logger.warning("SerpAPI search failed: %s", e)
+        return []
+
+
+async def _search_google_api(query: str, max_results: int) -> list[EngineResult]:
+    if not GOOGLE_API_KEY or not GOOGLE_CX:
+        return []
+    try:
+        url = "https://www.googleapis.com/customsearch/v1"
+        params = {
+            "q": query,
+            "key": GOOGLE_API_KEY,
+            "cx": GOOGLE_CX,
+            "num": min(max_results, 10),
+        }
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+        results = []
+        for item in data.get("items", [])[:max_results]:
+            results.append(
+                EngineResult(
+                    title=item.get("title", ""),
+                    url=item.get("link", ""),
+                    snippet=item.get("snippet", ""),
+                    source="google_api",
+                )
+            )
+        return results
+    except Exception as e:
+        logger.warning("Google Custom Search API failed: %s", e)
+        return []
+
+
 async def _search_google(query: str, max_results: int) -> list[EngineResult]:
+    if GOOGLE_API_KEY and GOOGLE_CX:
+        api_results = await _search_google_api(query, max_results)
+        if api_results:
+            return api_results
+        logger.info("Google API returned no results, falling back to scraping")
     try:
         from googlesearch import search
 
@@ -167,13 +268,15 @@ async def _search_searxng(
         return []
 
 
-ENGINE_NAMES = ["duckduckgo", "google", "bing", "searxng"]
+ENGINE_NAMES = ["duckduckgo", "google", "bing", "searxng", "brave", "serpapi"]
 
 ENGINE_REGISTRY: dict[str, callable] = {
     "duckduckgo": _search_ddg,
     "google": _search_google,
     "bing": _search_bing,
     "searxng": _search_searxng,
+    "brave": _search_brave_api,
+    "serpapi": _search_serpapi,
 }
 
 _ENGINE_FN_MAP: dict[str, str] = {
@@ -181,6 +284,8 @@ _ENGINE_FN_MAP: dict[str, str] = {
     "google": "_search_google",
     "bing": "_search_bing",
     "searxng": "_search_searxng",
+    "brave": "_search_brave_api",
+    "serpapi": "_search_serpapi",
 }
 
 
@@ -202,7 +307,16 @@ async def parallel_search(
     searxng_url: str = "",
 ) -> tuple[list[EngineResult], list[str], dict[str, str]]:
     if sources is None:
-        sources = ["duckduckgo", "google", "bing"]
+        sources = []
+        if BRAVE_SEARCH_API_KEY:
+            sources.append("brave")
+        else:
+            sources.append("duckduckgo")
+        if SERPAPI_KEY:
+            sources.append("serpapi")
+        else:
+            sources.append("google")
+        sources.append("bing")
         if searxng_url or SEARXNG_URL:
             sources.append("searxng")
 

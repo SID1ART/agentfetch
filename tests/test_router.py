@@ -7,7 +7,11 @@ from agentfetch.core.router import (
     _needs_browser,
     _is_retryable,
     _cloudflare_fetch,
+    _try_curl_cffi,
     CURL_CFFI_PROFILES,
+    FINGERPRINT_PROFILES,
+    _pick_fingerprint,
+    _stealth_init_script,
 )
 from agentfetch.core.schema import FetchResult, ScrapeConfig
 
@@ -160,3 +164,97 @@ async def test_smart_fetch_with_scrape_config():
         )
         result = await smart_fetch("https://example.com", config=config)
         assert result.content == "test content"
+
+
+@pytest.mark.asyncio
+async def test_try_curl_cffi_returns_fetch_result_on_success():
+    mock_curl_lib = MagicMock()
+    mock_async_session = MagicMock()
+    mock_curl_lib.requests.AsyncSession = mock_async_session
+    mock_resp = MagicMock()
+    mock_resp.text = (
+        "<html><head><title>Test</title></head><body><p>Hello world</p></body></html>"
+    )
+    mock_async_session.return_value.__aenter__.return_value.get.return_value = mock_resp
+    with patch.dict(
+        "sys.modules",
+        {"curl_cffi": mock_curl_lib, "curl_cffi.requests": mock_curl_lib.requests},
+    ):
+        result = await _try_curl_cffi("https://example.com")
+        assert result is not None
+        assert isinstance(result, FetchResult)
+        assert result.content
+        assert result.render_mode == "bypass"
+
+
+@pytest.mark.asyncio
+async def test_try_curl_cffi_returns_fetch_result_on_success():
+    mock_curl_lib = MagicMock()
+    mock_async_session = MagicMock()
+    mock_curl_lib.requests.AsyncSession = mock_async_session
+    mock_resp = MagicMock()
+    mock_resp.text = (
+        "<html><head><title>T</title></head><body><p>content here. " * 20
+        + "</p></body></html>"
+    )
+    mock_async_session.return_value.__aenter__.return_value.get.return_value = mock_resp
+    mock_instance = mock_async_session.return_value.__aenter__.return_value
+    mock_instance.get.return_value = mock_resp
+    with patch.dict(
+        "sys.modules",
+        {"curl_cffi": mock_curl_lib, "curl_cffi.requests": mock_curl_lib.requests},
+    ):
+        result = await _try_curl_cffi("https://example.com")
+        assert result is not None
+        assert isinstance(result, FetchResult)
+        assert result.render_mode == "bypass"
+
+
+@pytest.mark.asyncio
+async def test_try_curl_cffi_returns_none_on_empty_html():
+    mock_curl_lib = MagicMock()
+    mock_async_session = MagicMock()
+    mock_curl_lib.requests.AsyncSession = mock_async_session
+    mock_resp = MagicMock()
+    mock_resp.text = ""
+    mock_async_session.return_value.__aenter__.return_value.get.return_value = mock_resp
+    mock_instance = mock_async_session.return_value.__aenter__.return_value
+    mock_instance.get.return_value = mock_resp
+    with patch.dict(
+        "sys.modules",
+        {"curl_cffi": mock_curl_lib, "curl_cffi.requests": mock_curl_lib.requests},
+    ):
+        result = await _try_curl_cffi("https://example.com")
+        assert result is None
+
+
+def test_fingerprint_profiles_defined():
+    assert len(FINGERPRINT_PROFILES) >= 4
+    for p in FINGERPRINT_PROFILES:
+        assert "viewport" in p
+        assert "locale" in p
+        assert "timezone_id" in p
+        assert "width" in p["viewport"]
+        assert "height" in p["viewport"]
+
+
+def test_pick_fingerprint_returns_valid_profile():
+    fp = _pick_fingerprint()
+    assert fp["viewport"]["width"] > 0
+    assert fp["viewport"]["height"] > 0
+    assert "locale" in fp
+    assert "timezone_id" in fp
+
+
+def test_pick_fingerprint_respects_config_viewport():
+    custom = {"width": 800, "height": 600}
+    fp = _pick_fingerprint(custom)
+    assert fp["viewport"] == custom
+
+
+def test_stealth_init_script_contains_key_definitions():
+    script = _stealth_init_script()
+    assert "webdriver" in script
+    assert "plugins" in script
+    assert "languages" in script
+    assert "chrome" in script

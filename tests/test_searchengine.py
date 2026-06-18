@@ -6,11 +6,19 @@ from agentfetch.core.searchengine import (
     search_fetch,
     _search_ddg,
     _search_google,
+    _search_google_api,
     _search_bing,
     _search_searxng,
+    _search_brave_api,
+    _search_serpapi,
     ENGINE_REGISTRY,
+    ENGINE_NAMES,
     _configure_searxng,
     _get_engine_fn,
+    BRAVE_SEARCH_API_KEY,
+    SERPAPI_KEY,
+    GOOGLE_API_KEY,
+    GOOGLE_CX,
 )
 from agentfetch.core.schema import SearchResult, FetchResult
 
@@ -30,6 +38,193 @@ def test_engine_registry_contains_core_engines():
     assert "google" in ENGINE_REGISTRY
     assert "bing" in ENGINE_REGISTRY
     assert "searxng" in ENGINE_REGISTRY
+    assert "brave" in ENGINE_REGISTRY
+    assert "serpapi" in ENGINE_REGISTRY
+
+
+def test_engine_names_contains_new_engines():
+    assert "brave" in ENGINE_NAMES
+    assert "serpapi" in ENGINE_NAMES
+
+
+@pytest.mark.asyncio
+async def test_search_brave_api_returns_empty_when_no_key():
+    with patch("agentfetch.core.searchengine.BRAVE_SEARCH_API_KEY", ""):
+        results = await _search_brave_api("test", 5)
+        assert results == []
+
+
+@pytest.mark.asyncio
+async def test_search_serpapi_returns_empty_when_no_key():
+    with patch("agentfetch.core.searchengine.SERPAPI_KEY", ""):
+        results = await _search_serpapi("test", 5)
+        assert results == []
+
+
+@pytest.mark.asyncio
+async def test_search_google_api_returns_empty_when_no_keys():
+    with patch("agentfetch.core.searchengine.GOOGLE_API_KEY", ""):
+        with patch("agentfetch.core.searchengine.GOOGLE_CX", ""):
+            results = await _search_google_api("test", 5)
+            assert results == []
+
+
+@pytest.mark.asyncio
+async def test_search_brave_api_returns_results_when_key_set():
+    mock_data = {
+        "web": {
+            "results": [
+                {
+                    "title": "Brave Result",
+                    "url": "https://brave.com",
+                    "description": "Brave search engine",
+                }
+            ]
+        }
+    }
+    with patch("agentfetch.core.searchengine.BRAVE_SEARCH_API_KEY", "test_key"):
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = mock_data
+            mock_resp.raise_for_status.return_value = None
+            mock_client.return_value.__aenter__.return_value.get.return_value = (
+                mock_resp
+            )
+            results = await _search_brave_api("test", 5)
+            assert len(results) == 1
+            assert results[0].title == "Brave Result"
+            assert results[0].url == "https://brave.com"
+            assert results[0].source == "brave"
+
+
+@pytest.mark.asyncio
+async def test_search_serpapi_returns_results_when_key_set():
+    mock_data = {
+        "organic_results": [
+            {
+                "title": "Serp Result",
+                "link": "https://example.com",
+                "snippet": "a snippet",
+            }
+        ]
+    }
+    with patch("agentfetch.core.searchengine.SERPAPI_KEY", "test_key"):
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = mock_data
+            mock_resp.raise_for_status.return_value = None
+            mock_client.return_value.__aenter__.return_value.get.return_value = (
+                mock_resp
+            )
+            results = await _search_serpapi("test", 5)
+            assert len(results) == 1
+            assert results[0].title == "Serp Result"
+            assert results[0].source == "serpapi"
+
+
+@pytest.mark.asyncio
+async def test_search_google_api_returns_results_when_keys_set():
+    mock_data = {
+        "items": [
+            {
+                "title": "G Result",
+                "link": "https://google.com",
+                "snippet": "google result",
+            }
+        ]
+    }
+    with patch("agentfetch.core.searchengine.GOOGLE_API_KEY", "test_key"):
+        with patch("agentfetch.core.searchengine.GOOGLE_CX", "test_cx"):
+            with patch("httpx.AsyncClient") as mock_client:
+                mock_resp = MagicMock()
+                mock_resp.json.return_value = mock_data
+                mock_resp.raise_for_status.return_value = None
+                mock_client.return_value.__aenter__.return_value.get.return_value = (
+                    mock_resp
+                )
+                results = await _search_google_api("test", 5)
+                assert len(results) == 1
+                assert results[0].title == "G Result"
+                assert results[0].source == "google_api"
+
+
+@pytest.mark.asyncio
+async def test_search_google_uses_api_when_key_set():
+    with patch("agentfetch.core.searchengine.GOOGLE_API_KEY", "test_key"):
+        with patch("agentfetch.core.searchengine.GOOGLE_CX", "test_cx"):
+            with patch(
+                "agentfetch.core.searchengine._search_google_api",
+                new_callable=AsyncMock,
+            ) as mock_api:
+                mock_api.return_value = [
+                    EngineResult(
+                        title="API Result",
+                        url="https://api.com",
+                        snippet="api",
+                        source="google_api",
+                    )
+                ]
+                results, engines, errors = await parallel_search(
+                    "test", sources=["google"], max_results=5
+                )
+                assert len(results) >= 1
+                assert results[0].source == "google_api"
+
+
+@pytest.mark.asyncio
+async def test_parallel_search_includes_brave_when_key_set():
+    with patch("agentfetch.core.searchengine.BRAVE_SEARCH_API_KEY", "test_key"):
+        with patch("agentfetch.core.searchengine.SERPAPI_KEY", ""):
+            with patch(
+                "agentfetch.core.searchengine._search_brave_api", new_callable=AsyncMock
+            ) as mock_brave:
+                mock_brave.return_value = [
+                    EngineResult(
+                        title="B", url="https://brave.com", snippet="b", source="brave"
+                    )
+                ]
+                with patch("agentfetch.core.searchengine._search_ddg") as mock_ddg:
+                    mock_ddg.return_value = []
+                    with patch(
+                        "agentfetch.core.searchengine._search_google"
+                    ) as mock_google:
+                        mock_google.return_value = []
+                        with patch(
+                            "agentfetch.core.searchengine._search_bing"
+                        ) as mock_bing:
+                            mock_bing.return_value = []
+                            results, engines, errors = await parallel_search(
+                                "test", max_results=5
+                            )
+                            assert "brave" in engines
+
+
+@pytest.mark.asyncio
+async def test_parallel_search_includes_serpapi_when_key_set():
+    with patch("agentfetch.core.searchengine.BRAVE_SEARCH_API_KEY", ""):
+        with patch("agentfetch.core.searchengine.SERPAPI_KEY", "test_key"):
+            with patch(
+                "agentfetch.core.searchengine._search_serpapi", new_callable=AsyncMock
+            ) as mock_serp:
+                mock_serp.return_value = [
+                    EngineResult(
+                        title="S", url="https://serp.com", snippet="s", source="serpapi"
+                    )
+                ]
+                with patch("agentfetch.core.searchengine._search_ddg") as mock_ddg:
+                    mock_ddg.return_value = []
+                    with patch(
+                        "agentfetch.core.searchengine._search_google"
+                    ) as mock_google:
+                        mock_google.return_value = []
+                        with patch(
+                            "agentfetch.core.searchengine._search_bing"
+                        ) as mock_bing:
+                            mock_bing.return_value = []
+                            results, engines, errors = await parallel_search(
+                                "test", max_results=5
+                            )
+                            assert "serpapi" in engines
 
 
 @pytest.mark.asyncio

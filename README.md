@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-98%20passing-brightgreen)](https://github.com/SID1ART/agentfetch)
+[![Tests](https://img.shields.io/badge/tests-116%20passing-brightgreen)](https://github.com/SID1ART/agentfetch)
 
 agentfetch is a free, local alternative to Firecrawl, Exa, and Parallel.ai. It fetches any webpage, crawls any site, and searches the web — returning clean markdown that AI agents can consume directly.
 
@@ -184,7 +184,7 @@ print(sr.sources_used) # engines that returned results
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `max_results` | `int` | `5` | Max results per engine |
-| `sources` | `list[str]` | `None` | Engines: `duckduckgo`, `google`, `bing`, `searxng` |
+| `sources` | `list[str]` | `None` | Engines: `duckduckgo`, `google`, `bing`, `searxng`, `brave`, `serpapi` |
 | `scrape_results` | `bool` | `True` | Fetch full content of each result |
 | `searxng_url` | `str` | `""` | Self-hosted SearXNG instance URL |
 
@@ -208,7 +208,12 @@ print(sr.sources_used) # engines that returned results
 |----------|---------|-------------|
 | `REDIS_URL` | — | Redis connection for caching + job queue |
 | `SEARXNG_URL` | — | SearXNG instance for search (falls back to DuckDuckGo + Google + Bing) |
+| `BRAVE_SEARCH_API_KEY` | — | Brave Search API key (enables `brave` engine, preferred over DuckDuckGo) |
+| `SERPAPI_KEY` | — | SerpAPI key (enables `serpapi` engine, preferred over Google scraping) |
+| `GOOGLE_API_KEY` | — | Google Custom Search API key (used by `google` engine when both key and CX are set) |
+| `GOOGLE_CX` | — | Google Custom Search CX (required with `GOOGLE_API_KEY`) |
 | `ANTHROPIC_API_KEY` | — | For Claude-powered `agent_extract` |
+| `ANTHROPIC_MODEL` | `claude-3-haiku-20240307` | Claude model name for extraction |
 | `OLLAMA_URL` | — | Ollama endpoint for local LLM extraction |
 | `OLLAMA_MODEL` | `llama3.2` | Ollama model name |
 | `AGENTFETCH_CACHE_TTL` | `300` | In-memory LRU cache TTL (seconds) |
@@ -224,6 +229,7 @@ print(sr.sources_used) # engines that returned results
 | `AGENTFETCH_PORT` | `8080` | API server port |
 | `AGENTFETCH_JA3_PROFILE` | — | JA3 TLS profile override for `curl_cffi` |
 | `AGENTFETCH_STEALTH` | `true` | Enable browser stealth evasions in Playwright |
+| `AGENTFETCH_STEALTH_BASIC_FALLBACK` | `true` | Fall back to non-stealth browser if stealth fails |
 | `AGENTFETCH_CRAWL_DB` | `agentfetch_crawl.db` | SQLite path for crawl job persistence |
 | `AGENTFETCH_MIN_PROSE_RATIO` | `0.4` | Minimum alpha-char ratio for quality check |
 | `AGENTFETCH_MIN_WORDS` | `10` | Minimum word count for quality check |

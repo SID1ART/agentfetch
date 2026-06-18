@@ -30,6 +30,7 @@ router = APIRouter()
 REDIS_URL = os.environ.get("REDIS_URL", "")
 SEARXNG_URL = os.environ.get("SEARXNG_URL", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-3-haiku-20240307")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
 CACHE_TTL = int(os.environ.get("AGENTFETCH_CACHE_TTL", "3600"))
 
@@ -239,7 +240,7 @@ Content:
 
 Return only valid JSON matching the schema."""
         msg = client.messages.create(
-            model="claude-3-haiku-20240307",
+            model=ANTHROPIC_MODEL,
             max_tokens=4000,
             messages=[{"role": "user", "content": prompt}],
         )
