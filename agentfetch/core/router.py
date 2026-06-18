@@ -416,6 +416,9 @@ async def _try_cloudflare(
     )
 
 
+STEALTH_ENABLED = os.environ.get("AGENTFETCH_STEALTH", "true").lower() == "true"
+
+
 async def _browser_fetch(
     url: str,
     config: Optional[ScrapeConfig] = None,
@@ -443,6 +446,17 @@ async def _browser_fetch(
                 locale="en-US",
                 timezone_id="America/New_York",
             )
+
+            if config.stealth and STEALTH_ENABLED:
+                try:
+                    from playwright_stealth import Stealth
+
+                    Stealth(context)
+                    logger.debug("playwright-stealth applied for %s", url)
+                except ImportError:
+                    logger.debug(
+                        "playwright-stealth not installed, using basic stealth"
+                    )
 
             if cookies:
                 await context.add_cookies(cookies)

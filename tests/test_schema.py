@@ -157,6 +157,16 @@ def test_scrape_config_custom_ja3():
     assert c.ja3 == "safari17_0"
 
 
+def test_scrape_config_stealth_default():
+    c = ScrapeConfig()
+    assert c.stealth is True
+
+
+def test_scrape_config_stealth_disabled():
+    c = ScrapeConfig(stealth=False)
+    assert c.stealth is False
+
+
 def test_fetch_result_new_fields():
     r = FetchResult(
         url="https://example.com",

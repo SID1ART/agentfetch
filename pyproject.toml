@@ -52,7 +52,8 @@ crewai = ["crewai>=0.55"]
 curl-cffi = ["curl-cffi>=0.7"]
 ollama = []  # uses httpx which is already a dep
 search = ["googlesearch-python>=1.2"]  # adds Google search engine support
-all = ["agentfetch[langchain,llamaindex,crewai,curl-cffi,search]"]
+stealth = ["playwright-stealth>=1.0"]  # advanced browser stealth evasions
+all = ["agentfetch[langchain,llamaindex,crewai,curl-cffi,search,stealth]"]
 
 [project.scripts]
 agentfetch = "agentfetch.api.app:cli"

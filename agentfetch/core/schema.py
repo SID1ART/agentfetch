@@ -15,6 +15,7 @@ class ScrapeConfig(BaseModel):
     cookies: Optional[list[dict]] = None
     headers: Optional[dict[str, str]] = None
     ja3: Optional[str] = None
+    stealth: bool = True
 
 
 class FetchResult(BaseModel):

@@ -35,9 +35,13 @@ No PyPI account, no API tokens, no sign-up needed. GitHub is the source.
 - **Smart Mode Router** — detects JavaScript-heavy SPAs (Next.js, Nuxt, React) and falls back to Playwright headless browser automatically. Static pages use direct HTTP.
 - **5-layer extraction pipeline** — trafilatura → newspaper3k → readability-lxml → BeautifulSoup → plain text. Best-effort extraction from any HTML.
 - **Never raises exceptions** — always returns structured `FetchResult` with confidence scores, error fields, and injection detection. Agents can trust the output.
+- **Post-extraction quality check** — detects SPA shell text, low prose ratio, missing sentence structure, and downgrades confidence so agents can retry with browser engine.
+- **In-memory LRU cache** — deduplicates repeated URL fetches within a session. Configurable size/TTL via env vars. No Redis required.
 - **Information saturation crawling** — no arbitrary depth limits. CrawlStopper detects vocabulary saturation and content redundancy, stopping when enough data is gathered.
+- **Persistent crawl store** — SQLite-backed job persistence when Redis is not configured. Results survive process restarts.
 - **Prompt injection firewall** — 13 patterns detected and redacted to `[REDACTED BY AGENTFETCH]`.
 - **Cloudflare bypass** — optional `curl_cffi` integration with 12 TLS fingerprint profiles (Chrome 99–124, Safari 15/17) and auto-rotation.
+- **Browser stealth** — optional `playwright-stealth` integration for advanced anti-detection (WebGL vendor, canvas fingerprint, navigator.webdriver removal). Enabled by default.
 - **Robots.txt compliance** — optional async parser with caching, crawl-delay, and sitemap discovery.
 - **Proxy rotation** — round-robin or random proxy pools with automatic failure tracking.
 - **Local LLM extraction** — optional Ollama integration for structured data extraction without API costs.
@@ -150,6 +154,7 @@ print(sr.sources_used) # engines that returned results
 | `cookies` | `list[dict]` | `None` | Cookies to include in browser session |
 | `headers` | `dict[str,str]` | `None` | Custom HTTP headers |
 | `ja3` | `str` | `None` | JA3 TLS profile for `curl_cffi` bypass (e.g. `"chrome124"`) |
+| `stealth` | `bool` | `True` | Enable browser stealth evasions (playwright-stealth if available) |
 
 ### `FetchResult`
 
@@ -206,7 +211,8 @@ print(sr.sources_used) # engines that returned results
 | `ANTHROPIC_API_KEY` | — | For Claude-powered `agent_extract` |
 | `OLLAMA_URL` | — | Ollama endpoint for local LLM extraction |
 | `OLLAMA_MODEL` | `llama3.2` | Ollama model name |
-| `AGENTFETCH_CACHE_TTL` | `3600` | Cache TTL in seconds |
+| `AGENTFETCH_CACHE_TTL` | `300` | In-memory LRU cache TTL (seconds) |
+| `AGENTFETCH_CACHE_SIZE` | `100` | Max entries in in-memory LRU cache |
 | `AGENTFETCH_STATIC_TIMEOUT` | `15` | HTTP fetch timeout (seconds) |
 | `AGENTFETCH_BROWSER_TIMEOUT` | `30` | Playwright browser timeout (seconds) |
 | `AGENTFETCH_MAX_RETRIES` | `2` | Max retries for failed requests |
@@ -217,6 +223,10 @@ print(sr.sources_used) # engines that returned results
 | `AGENTFETCH_COOKIES_FILE` | — | Path to cookies file (Netscape or JSON) |
 | `AGENTFETCH_PORT` | `8080` | API server port |
 | `AGENTFETCH_JA3_PROFILE` | — | JA3 TLS profile override for `curl_cffi` |
+| `AGENTFETCH_STEALTH` | `true` | Enable browser stealth evasions in Playwright |
+| `AGENTFETCH_CRAWL_DB` | `agentfetch_crawl.db` | SQLite path for crawl job persistence |
+| `AGENTFETCH_MIN_PROSE_RATIO` | `0.4` | Minimum alpha-char ratio for quality check |
+| `AGENTFETCH_MIN_WORDS` | `10` | Minimum word count for quality check |
 
 ## Self-host
 
