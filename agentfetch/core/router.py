@@ -801,30 +801,40 @@ async def smart_fetch(
         tls_result = await _try_curl_cffi(url, config)
         if tls_result and tls_result.content:
             tls_result.render_mode = "bypass"
-            _quality_and_cache(url, tls_result, confidence_floor=confidence_floor)
+            _quality_and_cache(
+                url, tls_result, confidence_floor=confidence_floor, config=config
+            )
             return tls_result
         stealth_result = await _browser_fetch(url, config)
         if not stealth_result.content and config.stealth and STEALTH_BASIC_FALLBACK:
             basic_config = config.model_copy(update={"stealth": False})
             logger.info("Stealth browser failed for %s, trying basic browser", url)
             basic_result = await _browser_fetch(url, basic_config)
-            _quality_and_cache(url, basic_result, confidence_floor=confidence_floor)
+            _quality_and_cache(
+                url, basic_result, confidence_floor=confidence_floor, config=config
+            )
             return basic_result
-        _quality_and_cache(url, stealth_result, confidence_floor=confidence_floor)
+        _quality_and_cache(
+            url, stealth_result, confidence_floor=confidence_floor, config=config
+        )
         return stealth_result
 
     if _is_static_url(url):
         result, _ = await _static_fetch(url, config)
         result.render_mode = "static"
         if use_cache:
-            _quality_and_cache(url, result, confidence_floor=confidence_floor)
+            _quality_and_cache(
+                url, result, confidence_floor=confidence_floor, config=config
+            )
         return result
 
     result, html = await _static_fetch(url, config)
 
     if engine == "static":
         if use_cache:
-            _quality_and_cache(url, result, confidence_floor=confidence_floor)
+            _quality_and_cache(
+                url, result, confidence_floor=confidence_floor, config=config
+            )
         return result
 
     is_403 = result.error and (
@@ -832,12 +842,16 @@ async def smart_fetch(
     )
     if result.error and not is_403:
         if use_cache:
-            _quality_and_cache(url, result, confidence_floor=confidence_floor)
+            _quality_and_cache(
+                url, result, confidence_floor=confidence_floor, config=config
+            )
         return result
 
     if not html:
         if use_cache:
-            _quality_and_cache(url, result, confidence_floor=confidence_floor)
+            _quality_and_cache(
+                url, result, confidence_floor=confidence_floor, config=config
+            )
         return result
 
     if _is_cloudflare(html):
@@ -845,7 +859,9 @@ async def smart_fetch(
         cf_result = await _try_cloudflare(url, config)
         if cf_result and cf_result.content:
             cf_result.render_mode = "static"
-            _quality_and_cache(url, cf_result, confidence_floor=confidence_floor)
+            _quality_and_cache(
+                url, cf_result, confidence_floor=confidence_floor, config=config
+            )
             return cf_result
         logger.info(
             "Cloudflare bypass failed for %s, falling through to TLS fallback", url
