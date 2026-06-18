@@ -776,9 +776,12 @@ async def smart_fetch(
         confidence_floor = route.get("confidence_floor", 0.0)
 
     if use_cache:
-        cached = _memory_cache.get(url)
+        ck = _cache_key(url, config)
+        cached = _memory_cache.get(ck)
         if cached is not None:
             cached.cached = True
+            if config:
+                _apply_post_extraction(cached, config)
             return cached
 
     if cookies:
@@ -802,7 +805,11 @@ async def smart_fetch(
         if tls_result and tls_result.content:
             tls_result.render_mode = "bypass"
             _quality_and_cache(
-                url, tls_result, confidence_floor=confidence_floor, config=config
+                url,
+                tls_result,
+                confidence_floor=confidence_floor,
+                config=config,
+                do_cache=use_cache,
             )
             return tls_result
         stealth_result = await _browser_fetch(url, config)
@@ -811,47 +818,67 @@ async def smart_fetch(
             logger.info("Stealth browser failed for %s, trying basic browser", url)
             basic_result = await _browser_fetch(url, basic_config)
             _quality_and_cache(
-                url, basic_result, confidence_floor=confidence_floor, config=config
+                url,
+                basic_result,
+                confidence_floor=confidence_floor,
+                config=config,
+                do_cache=use_cache,
             )
             return basic_result
         _quality_and_cache(
-            url, stealth_result, confidence_floor=confidence_floor, config=config
+            url,
+            stealth_result,
+            confidence_floor=confidence_floor,
+            config=config,
+            do_cache=use_cache,
         )
         return stealth_result
 
     if _is_static_url(url):
         result, _ = await _static_fetch(url, config)
         result.render_mode = "static"
-        if use_cache:
-            _quality_and_cache(
-                url, result, confidence_floor=confidence_floor, config=config
-            )
+        _quality_and_cache(
+            url,
+            result,
+            confidence_floor=confidence_floor,
+            config=config,
+            do_cache=use_cache,
+        )
         return result
 
     result, html = await _static_fetch(url, config)
 
     if engine == "static":
-        if use_cache:
-            _quality_and_cache(
-                url, result, confidence_floor=confidence_floor, config=config
-            )
+        _quality_and_cache(
+            url,
+            result,
+            confidence_floor=confidence_floor,
+            config=config,
+            do_cache=use_cache,
+        )
         return result
 
     is_403 = result.error and (
         "403" in result.error or "forbidden" in result.error.lower()
     )
     if result.error and not is_403:
-        if use_cache:
-            _quality_and_cache(
-                url, result, confidence_floor=confidence_floor, config=config
-            )
+        _quality_and_cache(
+            url,
+            result,
+            confidence_floor=confidence_floor,
+            config=config,
+            do_cache=use_cache,
+        )
         return result
 
     if not html:
-        if use_cache:
-            _quality_and_cache(
-                url, result, confidence_floor=confidence_floor, config=config
-            )
+        _quality_and_cache(
+            url,
+            result,
+            confidence_floor=confidence_floor,
+            config=config,
+            do_cache=use_cache,
+        )
         return result
 
     if _is_cloudflare(html):
@@ -860,7 +887,11 @@ async def smart_fetch(
         if cf_result and cf_result.content:
             cf_result.render_mode = "static"
             _quality_and_cache(
-                url, cf_result, confidence_floor=confidence_floor, config=config
+                url,
+                cf_result,
+                confidence_floor=confidence_floor,
+                config=config,
+                do_cache=use_cache,
             )
             return cf_result
         logger.info(
@@ -875,7 +906,11 @@ async def smart_fetch(
         if tls_result and tls_result.content:
             tls_result.render_mode = "bypass"
             _quality_and_cache(
-                url, tls_result, confidence_floor=confidence_floor, config=config
+                url,
+                tls_result,
+                confidence_floor=confidence_floor,
+                config=config,
+                do_cache=use_cache,
             )
             return tls_result
         stealth_result = await _browser_fetch(url, config)
@@ -885,47 +920,67 @@ async def smart_fetch(
             basic_result = await _browser_fetch(url, basic_config)
 
             _quality_and_cache(
-                url, basic_result, confidence_floor=confidence_floor, config=config
+                url,
+                basic_result,
+                confidence_floor=confidence_floor,
+                config=config,
+                do_cache=use_cache,
             )
             return basic_result
         _quality_and_cache(
-            url, stealth_result, confidence_floor=confidence_floor, config=config
+            url,
+            stealth_result,
+            confidence_floor=confidence_floor,
+            config=config,
+            do_cache=use_cache,
         )
         return stealth_result
 
     if _is_static_url(url):
         result, _ = await _static_fetch(url, config)
         result.render_mode = "static"
-        if use_cache:
-            _quality_and_cache(
-                url, result, confidence_floor=confidence_floor, config=config
-            )
+        _quality_and_cache(
+            url,
+            result,
+            confidence_floor=confidence_floor,
+            config=config,
+            do_cache=use_cache,
+        )
         return result
 
     result, html = await _static_fetch(url, config)
 
     if engine == "static":
-        if use_cache:
-            _quality_and_cache(
-                url, result, confidence_floor=confidence_floor, config=config
-            )
+        _quality_and_cache(
+            url,
+            result,
+            confidence_floor=confidence_floor,
+            config=config,
+            do_cache=use_cache,
+        )
         return result
 
     is_403 = result.error and (
         "403" in result.error or "forbidden" in result.error.lower()
     )
     if result.error and not is_403:
-        if use_cache:
-            _quality_and_cache(
-                url, result, confidence_floor=confidence_floor, config=config
-            )
+        _quality_and_cache(
+            url,
+            result,
+            confidence_floor=confidence_floor,
+            config=config,
+            do_cache=use_cache,
+        )
         return result
 
     if not html:
-        if use_cache:
-            _quality_and_cache(
-                url, result, confidence_floor=confidence_floor, config=config
-            )
+        _quality_and_cache(
+            url,
+            result,
+            confidence_floor=confidence_floor,
+            config=config,
+            do_cache=use_cache,
+        )
         return result
 
     if _is_cloudflare(html):
@@ -934,7 +989,11 @@ async def smart_fetch(
         if cf_result and cf_result.content:
             cf_result.render_mode = "static"
             _quality_and_cache(
-                url, cf_result, confidence_floor=confidence_floor, config=config
+                url,
+                cf_result,
+                confidence_floor=confidence_floor,
+                config=config,
+                do_cache=use_cache,
             )
             return cf_result
         logger.info(
@@ -949,7 +1008,11 @@ async def smart_fetch(
         if tls_result and tls_result.content:
             tls_result.render_mode = "bypass"
             _quality_and_cache(
-                url, tls_result, confidence_floor=confidence_floor, config=config
+                url,
+                tls_result,
+                confidence_floor=confidence_floor,
+                config=config,
+                do_cache=use_cache,
             )
             return tls_result
         logger.info("curl_cffi TLS fallback failed for %s, trying browser", url)
@@ -960,15 +1023,29 @@ async def smart_fetch(
             basic_result = await _browser_fetch(url, basic_config)
 
             _quality_and_cache(
-                url, basic_result, confidence_floor=confidence_floor, config=config
+                url,
+                basic_result,
+                confidence_floor=confidence_floor,
+                config=config,
+                do_cache=use_cache,
             )
             return basic_result
         _quality_and_cache(
-            url, stealth_result, confidence_floor=confidence_floor, config=config
+            url,
+            stealth_result,
+            confidence_floor=confidence_floor,
+            config=config,
+            do_cache=use_cache,
         )
         return stealth_result
 
-    _quality_and_cache(url, result, confidence_floor=confidence_floor, config=config)
+    _quality_and_cache(
+        url,
+        result,
+        confidence_floor=confidence_floor,
+        config=config,
+        do_cache=use_cache,
+    )
     return result
 
 
@@ -988,11 +1065,23 @@ async def batch_fetch(
     return await asyncio.gather(*tasks)
 
 
+def _cache_key(url: str, config: Optional[ScrapeConfig] = None) -> str:
+    if config and (config.extract_highlights or config.output_schema):
+        schema_hash = hash(
+            json.dumps(config.output_schema, sort_keys=True)
+            if config.output_schema
+            else 0
+        )
+        return f"{url}|hl={config.extract_highlights}|sh={schema_hash}"
+    return url
+
+
 def _quality_and_cache(
     url: str,
     result: FetchResult,
     confidence_floor: float = 0.0,
     config: Optional[ScrapeConfig] = None,
+    do_cache: bool = True,
 ):
     if config:
         _apply_post_extraction(result, config)
@@ -1003,4 +1092,5 @@ def _quality_and_cache(
             result.error = (result.error + "; " if result.error else "") + q_error
     if confidence_floor > 0 and result.confidence < confidence_floor:
         result.confidence = confidence_floor
-    _memory_cache.put(url, result)
+    if do_cache:
+        _memory_cache.put(_cache_key(url, config), result)

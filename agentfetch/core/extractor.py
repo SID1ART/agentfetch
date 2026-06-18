@@ -42,6 +42,78 @@ def _resolve_field_schema(field_schema):
     return field_schema
 
 
+_NUMBER_WORD_PAT = re.compile(
+    r"(\d+(?:,\d{3})*(?:\.\d+)?)\s*(thousand|million|billion|trillion)\b", re.IGNORECASE
+)
+_NUMBER_SUFFIX_PAT = re.compile(
+    r"(\d+(?:,\d{3})*(?:\.\d+)?)\s*([kmbt])\b", re.IGNORECASE
+)
+_PLAIN_NUM_PAT = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
+
+
+def _proximity_score(pos: int, context_words: list[str], text: str) -> int:
+    text_lower = text.lower()
+    score = 0
+    for w in context_words:
+        idx = text_lower.find(w, max(0, pos - 80), pos + 80)
+        if idx >= 0:
+            score += max(0, 40 - abs(pos - idx))
+    return score
+
+
+def _parse_number_value(raw: str, context: str = "") -> Optional[float]:
+    clean = (
+        raw.lower().replace("$", "").replace("€", "").replace("£", "").replace(",", "")
+    )
+    context_words = context.lower().split() if context else []
+
+    candidates = []
+    for m in _NUMBER_WORD_PAT.finditer(clean):
+        val = float(m.group(1).replace(",", ""))
+        mult = {
+            "thousand": 1_000,
+            "million": 1_000_000,
+            "billion": 1_000_000_000,
+            "trillion": 1_000_000_000_000,
+        }.get(m.group(2).lower(), 1)
+        candidates.append(
+            (_proximity_score(m.start(), context_words, clean), val * mult)
+        )
+    for m in _NUMBER_SUFFIX_PAT.finditer(clean):
+        val = float(m.group(1).replace(",", ""))
+        mult = {
+            "k": 1_000,
+            "m": 1_000_000,
+            "b": 1_000_000_000,
+            "t": 1_000_000_000_000,
+        }.get(m.group(2).lower(), 1)
+        candidates.append(
+            (_proximity_score(m.start(), context_words, clean), val * mult)
+        )
+    for m in _PLAIN_NUM_PAT.finditer(clean):
+        val = float(m.group(0).replace(",", ""))
+        candidates.append((_proximity_score(m.start(), context_words, clean), val))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: -x[0])
+    return candidates[0][1]
+
+
+def _score_line_for_field(line: str, field_name: str, description: str) -> int:
+    score = 0
+    lower = line.lower()
+    fname_lower = field_name.lower().replace("_", " ")
+    if description and description.lower() in lower:
+        score += 3
+    if fname_lower in lower:
+        score += 2
+    for word in fname_lower.split():
+        if word in lower:
+            score += 1
+    return score
+
+
 def extract_by_schema(text: str, schema: dict) -> dict:
     result = {}
     props = schema.get("properties", {}) if schema.get("type") == "object" else schema
@@ -62,19 +134,28 @@ def extract_by_schema(text: str, schema: dict) -> dict:
                 if field_name.lower().replace("_", " ") in lower:
                     candidates.append(line)
             if candidates:
-                best = max(candidates, key=len)
+                best = max(
+                    candidates,
+                    key=lambda l: _score_line_for_field(l, field_name, description),
+                )
                 if field_type == "string":
                     result[field_name] = best
                 elif field_type in ("number", "integer"):
-                    nums = re.findall(
-                        r"[\d,]+(?:\.\d+)?",
-                        best.replace("$", "").replace("€", "").replace("£", ""),
-                    )
-                    if nums:
-                        raw = nums[0].replace(",", "")
+                    val = _parse_number_value(best, description)
+                    if val is not None:
                         result[field_name] = (
-                            int(raw) if field_type == "integer" else float(raw)
+                            int(val) if field_type == "integer" else val
                         )
+                    else:
+                        nums = re.findall(
+                            r"[\d,]+(?:\.\d+)?",
+                            best.replace("$", "").replace("€", "").replace("£", ""),
+                        )
+                        if nums:
+                            raw = nums[0].replace(",", "")
+                            result[field_name] = (
+                                int(raw) if field_type == "integer" else float(raw)
+                            )
                 elif field_type == "boolean":
                     val = (
                         best.split(":", 1)[-1].split("=", 1)[-1].strip()
