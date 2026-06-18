@@ -257,6 +257,36 @@ def _needs_browser(html: str, extracted_text: str) -> tuple[bool, list[str]]:
     return len(reasons) > 0, reasons
 
 
+async def _curl_fetch_raw(
+    url: str,
+    config: ScrapeConfig,
+    proxy: Optional[str] = None,
+) -> Optional[str]:
+    try:
+        from curl_cffi.requests import AsyncSession
+
+        profile = (
+            config.ja3
+            or os.environ.get("AGENTFETCH_JA3_PROFILE", "")
+            or random.choice(CURL_CFFI_PROFILES)
+        )
+        session_kwargs = {"impersonate": profile}
+        if proxy:
+            session_kwargs["proxies"] = {"https": proxy, "http": proxy}
+        async with AsyncSession(**session_kwargs) as session:
+            resp = await session.get(
+                url,
+                headers=_get_headers(config.headers),
+                timeout=STATIC_TIMEOUT,
+            )
+            return resp.text
+    except ImportError:
+        return None
+    except Exception as e:
+        logger.debug("curl_cffi fetch failed for %s: %s", url, e)
+        return None
+
+
 async def _fetch_with_retry(
     url: str,
     config: Optional[ScrapeConfig] = None,
@@ -265,6 +295,7 @@ async def _fetch_with_retry(
     proxy_used = None
     config = config or ScrapeConfig()
     timeout = STATIC_TIMEOUT
+    use_curl_cffi = True
 
     for attempt in range(1 + MAX_RETRIES):
         robots_delay = 0.0
@@ -280,6 +311,17 @@ async def _fetch_with_retry(
                 proxy = await pm.get_proxy()
 
         try:
+            if use_curl_cffi:
+                html = await _curl_fetch_raw(url, config, proxy)
+                if html is not None:
+                    if proxy:
+                        proxy_used = proxy
+                        if pm:
+                            await pm.mark_success(proxy)
+                    return html, attempt, proxy_used
+                use_curl_cffi = False
+                logger.debug("curl_cffi unavailable for %s, falling back to httpx", url)
+
             client_kwargs = {
                 "headers": _get_headers(config.headers),
                 "timeout": timeout,

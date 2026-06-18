@@ -10,6 +10,7 @@ import httpx
 
 from .schema import FetchResult, SearchResult, ScrapeConfig
 from .router import smart_fetch
+from .proxymanager import ProxyManager
 
 logger = logging.getLogger("agentfetch.searchengine")
 
@@ -19,12 +20,59 @@ SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 GOOGLE_CX = os.environ.get("GOOGLE_CX", "")
 
+SEARCH_RETRIES = int(os.environ.get("AGENTFETCH_SEARCH_RETRIES", "2"))
+SEARCH_TIMEOUT = int(os.environ.get("AGENTFETCH_SEARCH_TIMEOUT", "15"))
+
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
 ]
+
+_search_proxy_manager: Optional[ProxyManager] = None
+
+
+def _get_search_proxy() -> Optional[str]:
+    global _search_proxy_manager
+    if _search_proxy_manager is None:
+        _search_proxy_manager = ProxyManager()
+    if _search_proxy_manager.is_enabled():
+        import asyncio
+
+        try:
+            return asyncio.run(_search_proxy_manager.get_proxy())
+        except RuntimeError:
+            return None
+    return None
+
+
+def _is_rate_limited(error: str) -> bool:
+    lower = error.lower()
+    patterns = ["429", "rate limit", "too many requests", "quota exceeded"]
+    return any(p in lower for p in patterns)
+
+
+async def _with_search_retry(fn, *args, **kwargs) -> list["EngineResult"]:
+    last_err = ""
+    for attempt in range(1 + SEARCH_RETRIES):
+        try:
+            return await fn(*args, **kwargs)
+        except Exception as e:
+            last_err = str(e)
+            if _is_rate_limited(last_err) and attempt < SEARCH_RETRIES:
+                wait = (2**attempt) + random.uniform(0, 1)
+                logger.info(
+                    "Search rate limited, retry %d/%d after %.1fs",
+                    attempt + 1,
+                    SEARCH_RETRIES,
+                    wait,
+                )
+                await asyncio.sleep(wait)
+                continue
+            raise
+    msg = f"all {SEARCH_RETRIES + 1} attempts failed: {last_err}"
+    raise RuntimeError(msg)
 
 
 def _configure_searxng(url: str):
@@ -38,6 +86,17 @@ class EngineResult:
     url: str
     snippet: str
     source: str
+
+
+def _search_client(
+    **kwargs,
+) -> httpx.AsyncClient:
+    proxy = _get_search_proxy()
+    merged = {"timeout": SEARCH_TIMEOUT}
+    if proxy:
+        merged["proxies"] = proxy
+    merged.update(kwargs)
+    return httpx.AsyncClient(**merged)
 
 
 async def _search_ddg(query: str, max_results: int) -> list[EngineResult]:
@@ -62,6 +121,8 @@ async def _search_ddg(query: str, max_results: int) -> list[EngineResult]:
             if r.get("href")
         ]
     except Exception as e:
+        if _is_rate_limited(str(e)):
+            raise
         logger.warning("DuckDuckGo search failed: %s", e)
         return []
 
@@ -76,7 +137,7 @@ async def _search_brave_api(query: str, max_results: int) -> list[EngineResult]:
             "Accept": "application/json",
         }
         params = {"q": query, "count": min(max_results, 20)}
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with _search_client() as client:
             resp = await client.get(url, headers=headers, params=params)
             resp.raise_for_status()
             data = resp.json()
@@ -92,6 +153,8 @@ async def _search_brave_api(query: str, max_results: int) -> list[EngineResult]:
             )
         return results
     except Exception as e:
+        if _is_rate_limited(str(e)):
+            raise
         logger.warning("Brave Search API failed: %s", e)
         return []
 
@@ -107,7 +170,7 @@ async def _search_serpapi(query: str, max_results: int) -> list[EngineResult]:
             "engine": "google",
             "num": min(max_results, 10),
         }
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with _search_client() as client:
             resp = await client.get(url, params=params)
             resp.raise_for_status()
             data = resp.json()
@@ -123,6 +186,8 @@ async def _search_serpapi(query: str, max_results: int) -> list[EngineResult]:
             )
         return results
     except Exception as e:
+        if _is_rate_limited(str(e)):
+            raise
         logger.warning("SerpAPI search failed: %s", e)
         return []
 
@@ -138,7 +203,7 @@ async def _search_google_api(query: str, max_results: int) -> list[EngineResult]
             "cx": GOOGLE_CX,
             "num": min(max_results, 10),
         }
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with _search_client() as client:
             resp = await client.get(url, params=params)
             resp.raise_for_status()
             data = resp.json()
@@ -154,6 +219,8 @@ async def _search_google_api(query: str, max_results: int) -> list[EngineResult]
             )
         return results
     except Exception as e:
+        if _is_rate_limited(str(e)):
+            raise
         logger.warning("Google Custom Search API failed: %s", e)
         return []
 
@@ -191,14 +258,9 @@ async def _search_google(query: str, max_results: int) -> list[EngineResult]:
         return []
     except Exception as e:
         msg = str(e)
-        if (
-            "429" in msg
-            or "rate limit" in msg.lower()
-            or "too many requests" in msg.lower()
-        ):
-            logger.warning("Google rate limited (429) for query: %s", query)
-        else:
-            logger.warning("Google search failed: %s", msg)
+        if _is_rate_limited(msg):
+            raise
+        logger.warning("Google search failed: %s", msg)
         return []
 
 
@@ -212,9 +274,7 @@ async def _search_bing(query: str, max_results: int) -> list[EngineResult]:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
         }
-        async with httpx.AsyncClient(
-            headers=headers, timeout=15.0, follow_redirects=True
-        ) as client:
+        async with _search_client(headers=headers, follow_redirects=True) as client:
             resp = await client.get(url)
             resp.raise_for_status()
 
@@ -235,6 +295,8 @@ async def _search_bing(query: str, max_results: int) -> list[EngineResult]:
                 )
         return results[:max_results]
     except Exception as e:
+        if _is_rate_limited(str(e)):
+            raise
         logger.warning("Bing search failed: %s", e)
         return []
 
@@ -247,7 +309,7 @@ async def _search_searxng(
         return []
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with _search_client() as client:
             resp = await client.post(
                 f"{base_url}/search",
                 json={"q": query, "format": "json"},
@@ -264,6 +326,8 @@ async def _search_searxng(
                 if item.get("url")
             ]
     except Exception as e:
+        if _is_rate_limited(str(e)):
+            raise
         logger.warning("SearXNG search failed: %s", e)
         return []
 
@@ -325,14 +389,13 @@ async def parallel_search(
         valid_sources = ["duckduckgo"]
         sources = ["duckduckgo"]
 
-    tasks = []
-    for src in valid_sources:
+    async def _run_with_retry(src: str) -> list[EngineResult]:
         fn = _get_engine_fn(src)
         if src == "searxng":
-            tasks.append(fn(query, max_results, searxng_url))
-        else:
-            tasks.append(fn(query, max_results))
+            return await _with_search_retry(fn, query, max_results, searxng_url)
+        return await _with_search_retry(fn, query, max_results)
 
+    tasks = [_run_with_retry(src) for src in valid_sources]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     seen_urls: dict[str, str] = {}
