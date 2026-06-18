@@ -6,7 +6,7 @@ except ImportError:
     )
 
 from ...core.router import smart_fetch, batch_fetch
-from ...core.schema import FetchResult
+from ...core.schema import FetchResult, CrawlResult
 
 
 @tool
@@ -63,22 +63,32 @@ async def agentfetch_crawl(
 
     job_id = str(uuid.uuid4())
     req = CrawlRequest(url=url, max_depth=max_depth, max_pages=max_pages, query=query)
-    result = type(
-        "CrawlResult",
-        (),
-        {
-            "job_id": job_id,
-            "status": "pending",
-            "pages": [],
-            "total_pages": 0,
-            "stopped_reason": None,
-        },
-    )()
+    result = CrawlResult(job_id=job_id, status="pending")
     _crawl_jobs[job_id] = result
     import asyncio
 
     asyncio.create_task(_run_crawl(job_id, req))
     return f"Crawl started. Job ID: {job_id}"
+
+
+@tool
+async def agentfetch_status(job_id: str) -> str:
+    """Check the status of a crawl job.
+
+    Args:
+        job_id: The job ID returned by agentfetch_crawl.
+    """
+    from ...api.routes import _crawl_jobs
+
+    cr = _crawl_jobs.get(job_id)
+    if not cr:
+        return f"Job {job_id}: not found"
+    return (
+        f"Job ID: {cr.job_id}\n"
+        f"Status: {cr.status}\n"
+        f"Pages: {cr.total_pages}\n"
+        f"Stopped reason: {cr.stopped_reason}"
+    )
 
 
 def _format_result(r) -> str:
@@ -92,4 +102,9 @@ def _format_result(r) -> str:
     return "\n".join(lines)
 
 
-AgentFetchTools = [agentfetch_scrape, agentfetch_search, agentfetch_crawl]
+AgentFetchTools = [
+    agentfetch_scrape,
+    agentfetch_search,
+    agentfetch_crawl,
+    agentfetch_status,
+]

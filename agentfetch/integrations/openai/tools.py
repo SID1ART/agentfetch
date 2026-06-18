@@ -1,6 +1,7 @@
 """OpenAI-compatible tool definitions for any framework using OpenAI function calling."""
 
 from ...core.router import smart_fetch
+from ...core.schema import CrawlResult
 from ...api.routes import agent_search, CrawlRequest, _run_crawl, _crawl_jobs
 import asyncio
 import json
@@ -60,6 +61,20 @@ def get_tools() -> list[dict]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "agentfetch_status",
+                "description": "Check the status of a crawl job. Provide the job_id returned by agentfetch_crawl.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "job_id": {"type": "string"},
+                    },
+                    "required": ["job_id"],
+                },
+            },
+        },
     ]
 
 
@@ -108,22 +123,26 @@ async def handle_tool_call(name: str, args: dict) -> str:
                 max_pages=args.get("max_pages", 10),
                 query=args.get("query", ""),
             )
-            result = type(
-                "CrawlResult",
-                (),
-                {
-                    "job_id": job_id,
-                    "status": "pending",
-                    "pages": [],
-                    "total_pages": 0,
-                    "stopped_reason": None,
-                },
-            )()
+            result = CrawlResult(job_id=job_id, status="pending")
             _crawl_jobs[job_id] = result
             import asyncio
 
             asyncio.create_task(_run_crawl(job_id, req))
             return json.dumps({"job_id": job_id, "status": "pending"})
+
+        elif name == "agentfetch_status":
+            job_id = args["job_id"]
+            cr = _crawl_jobs.get(job_id)
+            if not cr:
+                return json.dumps({"error": f"Job {job_id}: not found"})
+            return json.dumps(
+                {
+                    "job_id": cr.job_id,
+                    "status": cr.status,
+                    "total_pages": cr.total_pages,
+                    "stopped_reason": cr.stopped_reason,
+                }
+            )
 
         else:
             return json.dumps({"error": f"Unknown tool: {name}"})

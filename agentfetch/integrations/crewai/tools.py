@@ -6,6 +6,7 @@ except ImportError:
     )
 
 from ...core.router import smart_fetch
+from ...core.schema import CrawlResult
 from ...api.routes import agent_search, CrawlRequest, _run_crawl, _crawl_jobs
 import uuid
 
@@ -36,19 +37,23 @@ async def crawl_tool(url: str) -> str:
     """Recursively crawl a website and gather information."""
     job_id = str(uuid.uuid4())
     req = CrawlRequest(url=url, max_depth=2, max_pages=10)
-    result = type(
-        "CrawlResult",
-        (),
-        {
-            "job_id": job_id,
-            "status": "pending",
-            "pages": [],
-            "total_pages": 0,
-            "stopped_reason": None,
-        },
-    )()
+    result = CrawlResult(job_id=job_id, status="pending")
     _crawl_jobs[job_id] = result
     import asyncio
 
     asyncio.create_task(_run_crawl(job_id, req))
     return f"Crawl started. Job ID: {job_id}"
+
+
+@tool("Check crawl status")
+async def status_tool(job_id: str) -> str:
+    """Check the status of a crawl job. Provide the job_id returned by the crawl tool."""
+    cr = _crawl_jobs.get(job_id)
+    if not cr:
+        return f"Job {job_id}: not found"
+    return (
+        f"Job ID: {cr.job_id}\n"
+        f"Status: {cr.status}\n"
+        f"Pages: {cr.total_pages}\n"
+        f"Stopped reason: {cr.stopped_reason}"
+    )
