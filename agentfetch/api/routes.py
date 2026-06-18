@@ -79,7 +79,7 @@ class SearchRequest(BaseModel):
 
 class ExtractRequest(BaseModel):
     url: str
-    schema: dict
+    extract_schema: dict
     provider: str = "auto"
 
 
@@ -182,11 +182,11 @@ async def agent_extract(req: ExtractRequest) -> FetchResult:
     page = await smart_fetch(req.url)
 
     if req.provider == "ollama" or (req.provider == "auto" and OLLAMA_URL):
-        page = await _ollama_extract(page, req.schema)
+        page = await _ollama_extract(page, req.extract_schema)
     elif req.provider == "anthropic" or (req.provider == "auto" and ANTHROPIC_API_KEY):
-        page = await _anthropic_extract(page, req.schema)
+        page = await _anthropic_extract(page, req.extract_schema)
     else:
-        page = _css_extract(page, req.schema)
+        page = _css_extract(page, req.extract_schema)
 
     return page
 

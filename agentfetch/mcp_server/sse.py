@@ -139,15 +139,14 @@ async def call_tool(name: str, arguments: dict) -> list:
             return [{"type": "text", "text": "\n".join(lines)}]
 
         elif name == "agent_extract":
-            import json as j
+            from ..api.routes import agent_extract as ae, ExtractRequest
 
             url = arguments["url"]
-            schema = j.loads(arguments.get("schema", "{}"))
-            from ..api.routes import agent_extract as ae
-
-            req = type(
-                "ExtractReq", (), {"url": url, "schema": schema, "provider": "auto"}
-            )()
+            schema_str = arguments.get("schema", "{}")
+            schema_dict = (
+                json.loads(schema_str) if isinstance(schema_str, str) else schema_str
+            )
+            req = ExtractRequest(url=url, extract_schema=schema_dict, provider="auto")
             result = await ae(req)
             return [{"type": "text", "text": f"# Extracted Data\n\n{result.content}"}]
 
