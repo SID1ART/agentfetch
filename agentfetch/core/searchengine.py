@@ -160,7 +160,7 @@ async def _search_ddg(
         if _is_rate_limited(str(e)):
             raise
         logger.warning("DuckDuckGo search failed: %s", e)
-        return []
+        raise
 
 
 BRAVE_TIME_MAP = {"day": "pd", "week": "pw", "month": "pm", "year": "py"}
@@ -209,7 +209,7 @@ async def _search_brave_api(
         if _is_rate_limited(str(e)):
             raise
         logger.warning("Brave Search API failed: %s", e)
-        return []
+        raise
 
 
 async def _search_serpapi(query: str, max_results: int) -> list[EngineResult]:
@@ -242,7 +242,7 @@ async def _search_serpapi(query: str, max_results: int) -> list[EngineResult]:
         if _is_rate_limited(str(e)):
             raise
         logger.warning("SerpAPI search failed: %s", e)
-        return []
+        raise
 
 
 async def _search_google_api(query: str, max_results: int) -> list[EngineResult]:
@@ -275,7 +275,7 @@ async def _search_google_api(query: str, max_results: int) -> list[EngineResult]
         if _is_rate_limited(str(e)):
             raise
         logger.warning("Google Custom Search API failed: %s", e)
-        return []
+        raise
 
 
 async def _search_google(query: str, max_results: int) -> list[EngineResult]:
@@ -314,7 +314,7 @@ async def _search_google(query: str, max_results: int) -> list[EngineResult]:
         if _is_rate_limited(msg):
             raise
         logger.warning("Google search failed: %s", msg)
-        return []
+        raise
 
 
 BING_TIME_MAP = {"day": "Day", "week": "Week", "month": "Month", "year": "Year"}
@@ -360,7 +360,7 @@ async def _search_bing(
         if _is_rate_limited(str(e)):
             raise
         logger.warning("Bing search failed: %s", e)
-        return []
+        raise
 
 
 async def _search_searxng(
@@ -391,7 +391,7 @@ async def _search_searxng(
         if _is_rate_limited(str(e)):
             raise
         logger.warning("SearXNG search failed: %s", e)
-        return []
+        raise
 
 
 ENGINE_NAMES = ["duckduckgo", "google", "bing", "searxng", "brave", "serpapi"]

@@ -229,9 +229,9 @@ async def test_parallel_search_includes_serpapi_when_key_set():
 
 
 @pytest.mark.asyncio
-async def test_search_ddg_returns_empty_on_failure():
-    results = await _search_ddg("", 5)
-    assert results == []
+async def test_search_ddg_raises_on_failure():
+    with pytest.raises(Exception):
+        await _search_ddg("", 5)
 
 
 @pytest.mark.asyncio
@@ -242,11 +242,11 @@ async def test_search_google_returns_empty_when_not_installed():
 
 
 @pytest.mark.asyncio
-async def test_search_bing_returns_empty_on_http_error():
+async def test_search_bing_raises_on_http_error():
     with patch("httpx.AsyncClient") as mock_client:
         mock_client.side_effect = Exception("connection error")
-        results = await _search_bing("test", 5)
-        assert results == []
+        with pytest.raises(Exception):
+            await _search_bing("test", 5)
 
 
 @pytest.mark.asyncio

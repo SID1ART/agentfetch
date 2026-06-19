@@ -33,7 +33,7 @@ dependencies = [
     "newspaper3k>=0.2",
     "readability-lxml>=0.8",
     "beautifulsoup4>=4.12",
-    "duckduckgo-search>=6.0",
+    "ddgs>=1.0",
     "mcp>=1.0",
     "anthropic>=0.34",
 ]

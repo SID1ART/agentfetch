@@ -43,6 +43,20 @@ SPA_SHELL_PATTERNS = [
     "We're sorry",
 ]
 
+BOT_CHALLENGE_PATTERNS = [
+    "JavaScript is disabled",
+    "verify you're not a robot",
+    "verify you are not a robot",
+    "requires JavaScript",
+    "challenge-platform",
+    "turnstile",
+    "cf-turnstile",
+    "imdb-challenge",
+    "aws-waf",
+    "bot détection",
+    "just a moment",
+]
+
 MIN_PROSE_RATIO = float(os.environ.get("AGENTFETCH_MIN_PROSE_RATIO", "0.4"))
 MIN_WORDS = int(os.environ.get("AGENTFETCH_MIN_WORDS", "10"))
 
@@ -252,6 +266,11 @@ def _needs_browser(html: str, extracted_text: str) -> tuple[bool, list[str]]:
     for marker in JS_FRAMEWORK_MARKERS:
         if marker in html:
             reasons.append(f"JS framework marker found: {marker}")
+            break
+    html_lower = html.lower()
+    for pattern in BOT_CHALLENGE_PATTERNS:
+        if pattern in html_lower:
+            reasons.append(f"bot challenge detected: '{pattern}'")
             break
     noscript_match = re.search(r"<noscript>(.*?)</noscript>", html, re.DOTALL)
     body_match = re.search(r"<body[^>]*>(.*?)</body>", html, re.DOTALL)
