@@ -32,6 +32,7 @@ No PyPI account, no API tokens, no sign-up needed. GitHub is the source.
 
 ### What makes it different
 
+- **Research Agent** — Tavily-style deep research: auto-decomposes questions into sub-queries, searches multiple engines, gathers full content, and synthesizes a structured report with citations via Ollama or Claude. Supports iterative follow-up (`depth="deep"`), structured output schemas, and four citation formats (numbered, MLA, APA, Chicago).
 - **Smart Mode Router** — detects JavaScript-heavy SPAs (Next.js, Nuxt, React) and falls back to Playwright headless browser automatically. Static pages use direct HTTP.
 - **5-layer extraction pipeline** — trafilatura → newspaper3k → readability-lxml → BeautifulSoup → plain text. Best-effort extraction from any HTML.
 - **Never raises exceptions** — always returns structured `FetchResult` with confidence scores, error fields, and injection detection. Agents can trust the output.
@@ -92,8 +93,24 @@ agentfetch-mcp
 ```bash
 pip install git+https://github.com/SID1ART/agentfetch.git
 agentfetch serve
+
+# Scrape
 curl -X POST http://localhost:8080/agent_scrape \
   -d '{"url": "https://example.com"}'
+
+# Research (async — returns job ID, poll for result)
+curl -X POST http://localhost:8080/agent_research \
+  -d '{"prompt": "Latest AI developments", "max_sources": 10}'
+# → {"request_id":"abc123","status":"pending",...}
+
+# Poll research result
+curl http://localhost:8080/agent_research/abc123
+# → {"request_id":"abc123","status":"complete","answer":"# Report...","sources":[...]}
+
+# Research with streaming (SSE)
+curl -X POST http://localhost:8080/agent_research/stream \
+  -d '{"prompt": "Compare OpenAI and Anthropic pricing", "citation_format": "apa"}'
+# → event: progress, event: result (full report)
 ```
 
 ### Python library
@@ -143,16 +160,16 @@ print(report.response_time) # e.g. 12.34s
 
 ## All integrations
 
-| Framework | Install | Import |
-|-----------|---------|--------|
-| LangChain | `pip install "agentfetch[langchain] @ git+https://github.com/SID1ART/agentfetch.git"` | `from agentfetch.integrations.langchain.tools import AgentFetchTools` |
-| LlamaIndex | `pip install "agentfetch[llamaindex] @ git+https://github.com/SID1ART/agentfetch.git"` | `from agentfetch.integrations.llamaindex.tools import AgentFetchToolSpec` |
-| CrewAI | `pip install "agentfetch[crewai] @ git+https://github.com/SID1ART/agentfetch.git"` | `from agentfetch.integrations.crewai.tools import scrape_tool` |
-| AutoGen | `pip install git+https://github.com/SID1ART/agentfetch.git` | `from agentfetch.integrations.openai.tools import get_tools` |
-| OpenAI / Gemini / Groq | `pip install git+https://github.com/SID1ART/agentfetch.git` | `from agentfetch.integrations.openai.tools import get_tools` |
-| Claude MCP | `pip install git+https://github.com/SID1ART/agentfetch.git` | `agentfetch-mcp` |
-| Ollama | `pip install git+https://github.com/SID1ART/agentfetch.git` | `from agentfetch.integrations.ollama.tools import ollama_extract` |
-| REST | `pip install git+https://github.com/SID1ART/agentfetch.git` | `agentfetch serve` |
+| Framework | Install | Tools available |
+|-----------|---------|----------------|
+| LangChain | `pip install "agentfetch[langchain] @ git+https://github.com/SID1ART/agentfetch.git"` | `scrape`, `search`, `crawl`, `map`, `status`, **`research`** |
+| LlamaIndex | `pip install "agentfetch[llamaindex] @ git+https://github.com/SID1ART/agentfetch.git"` | `scrape`, `search`, `crawl`, `map`, `status`, **`research`** |
+| CrewAI | `pip install "agentfetch[crewai] @ git+https://github.com/SID1ART/agentfetch.git"` | `scrape`, `search`, `crawl`, `map`, `status`, **`research`** |
+| AutoGen | `pip install git+https://github.com/SID1ART/agentfetch.git` | `scrape`, `search`, `crawl`, `map`, `status`, **`research`** |
+| OpenAI / Gemini / Groq | `pip install git+https://github.com/SID1ART/agentfetch.git` | `scrape`, `search`, `crawl`, `map`, `status`, **`research`** |
+| Claude MCP | `pip install git+https://github.com/SID1ART/agentfetch.git` | `scrape`, `search`, `crawl`, `map`, `status`, **`research`** |
+| Ollama | `pip install git+https://github.com/SID1ART/agentfetch.git` | `extract` |
+| REST | `pip install git+https://github.com/SID1ART/agentfetch.git` | All endpoints + **`/agent_research`** + streaming |
 
 ## Schema reference
 
@@ -304,6 +321,16 @@ config = ScrapeConfig(screenshot=True, actions=[...])
 | `depth` | `str` | `"standard"` | Research depth: `"quick"`, `"standard"`, `"deep"` (deep enables iterative follow-up queries) |
 | `max_iterations` | `int` | `4` | Max follow-up iterations when `depth="deep"` |
 
+### `ResearchSource`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `url` | `str` | Source URL |
+| `title` | `str` | Page title |
+| `content` | `str` | Extracted text content |
+| `relevance_score` | `float` | Relevance to the research question (0.0–1.0) |
+| `citation` | `str` | Pre-formatted citation string (e.g. `[1]`, `(Author, 2024)`) |
+
 ### `ResearchResult`
 
 | Field | Type | Description |
@@ -331,10 +358,10 @@ config = ScrapeConfig(screenshot=True, actions=[...])
 | `SERPAPI_KEY` | — | SerpAPI key (enables `serpapi` engine, preferred over Google scraping) |
 | `GOOGLE_API_KEY` | — | Google Custom Search API key (used by `google` engine when both key and CX are set) |
 | `GOOGLE_CX` | — | Google Custom Search CX (required with `GOOGLE_API_KEY`) |
-| `ANTHROPIC_API_KEY` | — | For Claude-powered `agent_extract` |
-| `ANTHROPIC_MODEL` | `claude-3-haiku-20240307` | Claude model name for extraction |
-| `OLLAMA_URL` | — | Ollama endpoint for local LLM extraction |
-| `OLLAMA_MODEL` | `llama3.2` | Ollama model name |
+| `ANTHROPIC_API_KEY` | — | For Claude-powered `agent_extract` and research agent synthesis |
+| `ANTHROPIC_MODEL` | `claude-3-haiku-20240307` | Claude model name for extraction and research |
+| `OLLAMA_URL` | — | Ollama endpoint for local LLM extraction and research agent |
+| `OLLAMA_MODEL` | `llama3.2` | Ollama model name for extraction and research |
 | `AGENTFETCH_CACHE_TTL` | `300` | In-memory LRU cache TTL (seconds) |
 | `AGENTFETCH_CACHE_SIZE` | `100` | Max entries in in-memory LRU cache |
 | `AGENTFETCH_STATIC_TIMEOUT` | `15` | HTTP fetch timeout (seconds) |

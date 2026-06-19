@@ -1,4 +1,4 @@
-from .schema import FetchResult, CrawlResult, SearchResult, SearchConfig, ScrapeConfig
+from .schema import FetchResult, CrawlResult, SearchResult, SearchConfig, ScrapeConfig, ResearchConfig, ResearchResult, ResearchSource
 from .router import smart_fetch, batch_fetch
 from .searchengine import (
     parallel_search,
