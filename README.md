@@ -1,12 +1,12 @@
 # agentfetch
 
-**Open-source web retrieval built for AI agents.**
+**Open-source web retrieval & research agent built for AI agents.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-116%20passing-brightgreen)](https://github.com/SID1ART/agentfetch)
+[![Tests](https://img.shields.io/badge/tests-138%20passing-brightgreen)](https://github.com/SID1ART/agentfetch)
 
-agentfetch is a free, local alternative to Firecrawl, Exa, and Parallel.ai. It fetches any webpage, crawls any site, and searches the web — returning clean markdown that AI agents can consume directly.
+agentfetch is a free, local alternative to Firecrawl, Exa, Parallel.ai, and Tavily. It fetches any webpage, crawls any site, searches the web, and researches any topic — returning clean markdown and structured reports that AI agents can consume directly.
 
 Works with **LangChain, LlamaIndex, CrewAI, AutoGen, Claude MCP, OpenAI function calling, Gemini, Groq, and plain REST.** No vendor lock-in, no API keys required.
 
@@ -57,6 +57,7 @@ No PyPI account, no API tokens, no sign-up needed. GitHub is the source.
 | `agent_extract` | Structured data extraction by JSON schema via Ollama, Anthropic Claude, or CSS fallback. |
 | `agent_map` | Discover all URLs on a website via sitemap.xml and BFS crawling. |
 | `agent_status` | Poll crawl job progress (in-memory or Redis). |
+| `agent_research` | **Research a topic**: decomposes into sub-queries, searches multi-engine, gathers content, synthesizes a structured report with citations via LLM. Supports deep iterative follow-up and structured output schemas. |
 
 ### Library API
 
@@ -66,6 +67,7 @@ No PyPI account, no API tokens, no sign-up needed. GitHub is the source.
 | `batch_fetch(urls, concurrency=)` | Fetch multiple URLs concurrently. Returns `list[FetchResult]`. |
 | `search_fetch(query, sources=, max_results=)` | Search and optionally scrape results. Returns `SearchResult`. |
 | `parallel_search(query, sources=, max_results=)` | Search engine results without scraping. Returns `tuple[list[EngineResult], list[str], dict[str, str]]`. |
+| `smart_research(prompt, config=)` | Research a topic: decomposes query, gathers sources, synthesizes report with citations via LLM. Returns `ResearchResult`. |
 
 ## Quickstart
 
@@ -122,6 +124,21 @@ sr = asyncio.run(search_fetch(
 print(sr.results)      # list[FetchResult]
 print(sr.errors)       # per-engine errors, e.g. {"google": "rate limited (429)"}
 print(sr.sources_used) # engines that returned results
+
+# Research a topic (uses Ollama or Claude for query decomposition and synthesis)
+from agentfetch import smart_research, ResearchConfig
+
+report = asyncio.run(smart_research(
+    "Compare pricing of OpenAI, Anthropic, and Google AI APIs",
+    config=ResearchConfig(
+        max_sources=15,
+        citation_format="apa",
+        depth="deep",
+    )
+))
+print(report.answer)        # Comprehensive report with [Author, Year] citations
+print(report.sources)       # list of ResearchSource with full content
+print(report.response_time) # e.g. 12.34s
 ```
 
 ## All integrations
@@ -273,6 +290,35 @@ config = ScrapeConfig(screenshot=True, actions=[...])
 | `total` | `int` | Total number of discovered URLs |
 | `sources` | `list[str]` | Discovery methods used (`sitemap`, `crawl`) |
 
+### `ResearchConfig`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `prompt` | `str` | — | The research question or topic |
+| `model` | `str` | `"auto"` | Model tier: `"mini"` (fast/cheap), `"pro"` (comprehensive), `"auto"` |
+| `max_sources` | `int` | `20` | Maximum sources to gather |
+| `output_schema` | `dict` | `None` | JSON Schema for structured output in the report |
+| `citation_format` | `str` | `"numbered"` | Citation style: `"numbered"`, `"mla"`, `"apa"`, `"chicago"` |
+| `include_domains` | `list[str]` | `None` | Prioritize results from these domains |
+| `exclude_domains` | `list[str]` | `None` | Exclude results from these domains |
+| `depth` | `str` | `"standard"` | Research depth: `"quick"`, `"standard"`, `"deep"` (deep enables iterative follow-up queries) |
+| `max_iterations` | `int` | `4` | Max follow-up iterations when `depth="deep"` |
+
+### `ResearchResult`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `request_id` | `str` | Unique job ID |
+| `query` | `str` | Original research question |
+| `answer` | `str` | Structured markdown report with citations |
+| `sources` | `list[ResearchSource]` | Gathered sources with title, URL, content, and formatted citation |
+| `structured_output` | `dict` | JSON matching `output_schema` if provided |
+| `model_used` | `str` | LLM provider used for synthesis (`ollama`, `anthropic`) |
+| `total_sources` | `int` | Number of sources gathered |
+| `response_time` | `float` | Total research time in seconds |
+| `status` | `str` | `"pending"`, `"running"`, `"complete"`, or `"failed"` |
+| `error` | `str` | Error message if the research failed |
+
 ## Configuration
 
 ### Environment variables
@@ -375,7 +421,7 @@ docker compose --profile worker up -d
 ```bash
 pip install -e ".[all]"
 pytest tests/ -v
-# 98 tests passing
+# 138 tests passing
 ```
 
 ## License
