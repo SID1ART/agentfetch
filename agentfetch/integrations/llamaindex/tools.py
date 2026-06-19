@@ -74,6 +74,17 @@ async def status(job_id: str) -> str:
     )
 
 
+async def research(prompt: str, max_sources: int = 10, depth: str = "standard") -> str:
+    from ...core.researcher import smart_research
+    from ...core.schema import ResearchConfig
+
+    config = ResearchConfig(prompt=prompt, max_sources=max_sources, depth=depth)
+    result = await smart_research(input=prompt, config=config)
+    return f"# Research Report\n\n{result.answer}\n\n## Sources\n" + "\n".join(
+        f"  {s.citation} {s.title or s.url}" for s in result.sources
+    )
+
+
 class AgentFetchToolSpec:
     def to_tool_list(self) -> list:
         return [
@@ -101,5 +112,10 @@ class AgentFetchToolSpec:
                 async_fn=map_urls,
                 name="agentfetch_map",
                 description="Discover all URLs on a website via sitemap and crawl",
+            ),
+            FunctionTool.from_defaults(
+                async_fn=research,
+                name="agentfetch_research",
+                description="Research a topic and return a comprehensive report with citations",
             ),
         ]

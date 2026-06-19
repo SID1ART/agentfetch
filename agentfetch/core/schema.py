@@ -115,3 +115,36 @@ class SearchResult(BaseModel):
     total_results: int = 0
     errors: dict[str, str] = Field(default_factory=dict)
     answer: Optional[str] = None
+
+
+class ResearchConfig(BaseModel):
+    prompt: str
+    model: str = "auto"
+    max_sources: int = 20
+    output_schema: Optional[dict] = None
+    citation_format: str = "numbered"
+    include_domains: Optional[list[str]] = None
+    exclude_domains: Optional[list[str]] = None
+    depth: str = "standard"
+    max_iterations: int = 4
+
+
+class ResearchSource(BaseModel):
+    url: str
+    title: Optional[str] = None
+    content: str = ""
+    relevance_score: float = 0.0
+    citation: str = ""
+
+
+class ResearchResult(BaseModel):
+    request_id: str = ""
+    query: str = ""
+    answer: str = ""
+    sources: list[ResearchSource] = Field(default_factory=list)
+    structured_output: Optional[dict] = None
+    model_used: str = ""
+    total_sources: int = 0
+    response_time: float = 0.0
+    status: str = "pending"
+    error: Optional[str] = None

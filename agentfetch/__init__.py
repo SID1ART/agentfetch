@@ -17,6 +17,9 @@ from .core.schema import (
     MapResult,
     MapConfig,
     Action,
+    ResearchConfig,
+    ResearchResult,
+    ResearchSource,
 )
 from .core.sanitizer import sanitize
 from .core.stopper import CrawlStopper
@@ -26,6 +29,7 @@ from .core.extractor import (
     extract_highlights,
     extract_structured,
 )
+from .core.researcher import smart_research
 
 __all__ = [
     "smart_fetch",
@@ -50,4 +54,8 @@ __all__ = [
     "extract_structured",
     "generate_query_variations",
     "EngineResult",
+    "ResearchConfig",
+    "ResearchResult",
+    "ResearchSource",
+    "smart_research",
 ]

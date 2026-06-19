@@ -92,6 +92,22 @@ def get_tools() -> list[dict]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "agentfetch_research",
+                "description": "Research a topic and return a comprehensive report with citations.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string", "description": "The research question or topic"},
+                        "max_sources": {"type": "integer", "default": 10},
+                        "depth": {"type": "string", "enum": ["quick", "standard", "deep"], "default": "standard"},
+                    },
+                    "required": ["prompt"],
+                },
+            },
+        },
     ]
 
 
@@ -173,6 +189,25 @@ async def handle_tool_call(name: str, args: dict) -> str:
                     "stopped_reason": cr.stopped_reason,
                 }
             )
+
+        elif name == "agentfetch_research":
+            from ...core.researcher import smart_research
+            from ...core.schema import ResearchConfig
+
+            config = ResearchConfig(
+                prompt=args["prompt"],
+                max_sources=args.get("max_sources", 10),
+                depth=args.get("depth", "standard"),
+            )
+            result = await smart_research(input=args["prompt"], config=config)
+            return json.dumps({
+                "answer": result.answer,
+                "total_sources": result.total_sources,
+                "sources": [
+                    {"url": s.url, "title": s.title, "citation": s.citation}
+                    for s in result.sources
+                ],
+            })
 
         else:
             return json.dumps({"error": f"Unknown tool: {name}"})

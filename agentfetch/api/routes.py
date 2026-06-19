@@ -9,6 +9,8 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 
+from fastapi.responses import StreamingResponse
+
 from ..core.router import smart_fetch, batch_fetch
 from ..core.mapper import smart_map as smart_map_fn
 from ..core.searchengine import parallel_search, search_fetch, _configure_searxng
@@ -21,7 +23,10 @@ from ..core.schema import (
     SearchResult,
     SearchConfig,
     ScrapeConfig,
+    ResearchConfig,
+    ResearchResult,
 )
+from ..core.researcher import smart_research
 from ..core.stopper import CrawlStopper
 from ..core.robotstxt import RobotsChecker
 from ..core.job_queue import JobQueue
@@ -51,6 +56,7 @@ if REDIS_URL:
 
 _crawl_jobs: dict[str, CrawlResult] = {}
 _crawl_store = CrawlStore()
+_research_jobs: dict[str, ResearchResult] = {}
 
 
 class ScrapeRequest(BaseModel):
@@ -101,6 +107,19 @@ class MapRequest(BaseModel):
     exclude_patterns: Optional[list[str]] = None
     include_domains: Optional[list[str]] = None
     exclude_domains: Optional[list[str]] = None
+
+
+class ResearchRequest(BaseModel):
+    prompt: str
+    model: str = "auto"
+    max_sources: int = 20
+    output_schema: Optional[dict] = None
+    citation_format: str = "numbered"
+    include_domains: Optional[list[str]] = None
+    exclude_domains: Optional[list[str]] = None
+    depth: str = "standard"
+    max_iterations: int = 4
+    stream: bool = False
 
 
 class SearchResultItem(BaseModel):
@@ -231,6 +250,81 @@ async def agent_map(req: MapRequest) -> MapResult:
         exclude_domains=req.exclude_domains,
     )
     return await smart_map_fn(req.url, config=config)
+
+
+@router.post("/agent_research")
+async def agent_research(
+    req: ResearchRequest, background_tasks: BackgroundTasks
+) -> ResearchResult:
+    config = ResearchConfig(
+        prompt=req.prompt,
+        model=req.model,
+        max_sources=req.max_sources,
+        output_schema=req.output_schema,
+        citation_format=req.citation_format,
+        include_domains=req.include_domains,
+        exclude_domains=req.exclude_domains,
+        depth=req.depth,
+        max_iterations=req.max_iterations,
+    )
+    job_id = str(uuid.uuid4())[:8]
+    result = ResearchResult(request_id=job_id, query=req.prompt, status="pending")
+    _research_jobs[job_id] = result
+    background_tasks.add_task(_run_research, job_id, config)
+    return result
+
+
+@router.get("/agent_research/{request_id}")
+async def get_research(request_id: str) -> ResearchResult:
+    result = _research_jobs.get(request_id)
+    if result is None:
+        return ResearchResult(
+            request_id=request_id,
+            status="failed",
+            error=f"Research job {request_id} not found",
+        )
+    return result
+
+
+@router.post("/agent_research/stream")
+async def research_stream(req: ResearchRequest):
+    config = ResearchConfig(
+        prompt=req.prompt,
+        model=req.model,
+        max_sources=req.max_sources,
+        output_schema=req.output_schema,
+        citation_format=req.citation_format,
+        include_domains=req.include_domains,
+        exclude_domains=req.exclude_domains,
+        depth=req.depth,
+        max_iterations=req.max_iterations,
+    )
+
+    async def event_stream():
+        yield f"data: {json.dumps({'phase': 'planning', 'status': 'started'})}\n\n"
+        result = await smart_research(config.prompt, config=config)
+        yield f"data: {json.dumps({'phase': 'complete', 'status': 'done'})}\n\n"
+        yield f"data: {json.dumps({'phase': 'result', 'result': result.model_dump()})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+async def _run_research(job_id: str, config: ResearchConfig):
+    result = _research_jobs.get(job_id)
+    if result is None:
+        return
+    try:
+        completed = await smart_research(config.prompt, config=config)
+        completed.request_id = job_id
+        _research_jobs[job_id] = completed
+    except Exception as e:
+        logger.exception("Research job %s failed", job_id)
+        _research_jobs[job_id] = ResearchResult(
+            request_id=job_id,
+            query=config.prompt,
+            status="failed",
+            error=str(e),
+        )
 
 
 async def _ollama_extract(page: FetchResult, schema: dict) -> FetchResult:

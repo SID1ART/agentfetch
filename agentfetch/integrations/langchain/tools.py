@@ -136,10 +136,30 @@ def _format_result(r) -> str:
     return "\n".join(lines)
 
 
+@tool
+async def agentfetch_research(prompt: str, max_sources: int = 10, depth: str = "standard") -> str:
+    """Research a topic and return a comprehensive report with citations.
+
+    Args:
+        prompt: The research question or topic.
+        max_sources: Maximum number of sources to gather.
+        depth: 'quick', 'standard', or 'deep'.
+    """
+    from ...core.researcher import smart_research
+    from ...core.schema import ResearchConfig
+
+    config = ResearchConfig(prompt=prompt, max_sources=max_sources, depth=depth)
+    result = await smart_research(input=prompt, config=config)
+    return f"# Research Report\n\n{result.answer}\n\n## Sources\n" + "\n".join(
+        f"  {s.citation} {s.title or s.url}" for s in result.sources
+    )
+
+
 AgentFetchTools = [
     agentfetch_scrape,
     agentfetch_search,
     agentfetch_crawl,
     agentfetch_map,
     agentfetch_status,
+    agentfetch_research,
 ]

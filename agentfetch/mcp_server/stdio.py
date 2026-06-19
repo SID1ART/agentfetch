@@ -108,15 +108,28 @@ async def list_tools():
                 "required": ["job_id"],
             },
         },
+        {
+            "name": "agent_research",
+            "description": "Research a topic and return a comprehensive report with citations.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "The research question or topic"},
+                    "max_sources": {"type": "integer", "default": 10},
+                    "depth": {"type": "string", "enum": ["quick", "standard", "deep"], "default": "standard"},
+                },
+                "required": ["prompt"],
+            },
+        },
     ]
 
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list:
-from ..core.router import smart_fetch
-from ..core.mapper import smart_map
-from ..core.schema import FetchResult, CrawlResult, MapConfig
-from ..api.routes import _crawl_jobs, _crawl_store, _run_crawl, agent_search
+    from ..core.router import smart_fetch
+    from ..core.mapper import smart_map
+    from ..core.schema import FetchResult, CrawlResult, MapConfig
+    from ..api.routes import _crawl_jobs, _crawl_store, _run_crawl, agent_search
 
     try:
         if name == "agent_scrape":
@@ -231,6 +244,21 @@ from ..api.routes import _crawl_jobs, _crawl_store, _run_crawl, agent_search
                     "text": f"# Crawl Status\n\nJob ID: {cr.job_id}\nStatus: {cr.status}\nPages: {cr.total_pages}\nStopped reason: {cr.stopped_reason}",
                 }
             ]
+
+        elif name == "agent_research":
+            from ..core.researcher import smart_research
+            from ..core.schema import ResearchConfig
+
+            config = ResearchConfig(
+                prompt=arguments["prompt"],
+                max_sources=arguments.get("max_sources", 10),
+                depth=arguments.get("depth", "standard"),
+            )
+            result = await smart_research(input=arguments["prompt"], config=config)
+            report = f"# Research Report\n\n{result.answer}\n\n## Sources ({result.total_sources})\n"
+            for s in result.sources:
+                report += f"\n{s.citation} {s.title or s.url}"
+            return [{"type": "text", "text": report}]
 
         else:
             return [{"type": "text", "text": f"Unknown tool: {name}"}]

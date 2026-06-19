@@ -60,6 +60,19 @@ async def map_tool(url: str) -> str:
     return "\n".join(lines)
 
 
+@tool("Research a topic")
+async def research_tool(prompt: str) -> str:
+    """Research a topic and return a comprehensive report with citations."""
+    from ...core.researcher import smart_research
+    from ...core.schema import ResearchConfig
+
+    config = ResearchConfig(prompt=prompt)
+    result = await smart_research(input=prompt, config=config)
+    return f"# Research Report\n\n{result.answer}\n\n## Sources\n" + "\n".join(
+        f"  {s.citation} {s.title or s.url}" for s in result.sources
+    )
+
+
 @tool("Check crawl status")
 async def status_tool(job_id: str) -> str:
     """Check the status of a crawl job. Provide the job_id returned by the crawl tool."""
