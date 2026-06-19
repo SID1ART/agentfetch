@@ -155,6 +155,8 @@ print(sr.sources_used) # engines that returned results
 | `headers` | `dict[str,str]` | `None` | Custom HTTP headers |
 | `ja3` | `str` | `None` | JA3 TLS profile for `curl_cffi` bypass (e.g. `"chrome124"`) |
 | `stealth` | `bool` | `True` | Enable browser stealth evasions (playwright-stealth if available) |
+| `actions` | `list[Action]` | `[]` | Action chain to execute before extraction (click, scroll, type, wait, press, select, screenshot) |
+| `screenshot` | `bool` | `False` | Capture a full-page screenshot (PNG, base64-encoded in `screenshot_data`) |
 
 ### `FetchResult`
 
@@ -178,6 +180,37 @@ print(sr.sources_used) # engines that returned results
 | `robots_allowed` | `bool` | Whether robots.txt permitted the fetch |
 | `proxy_used` | `str` | Proxy used for this request |
 | `normalized_url` | `str` | Normalized version of the requested URL |
+| `screenshot_data` | `str` | Base64-encoded PNG screenshot (when `screenshot=True` in ScrapeConfig) |
+
+### `Action`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `type` | `str` | — | Action type: `click`, `scroll`, `type`, `wait`, `press`, `select`, or `screenshot` |
+| `selector` | `str` | `None` | CSS selector for `click`, `type`, `scroll`, `press`, `select` actions |
+| `value` | `str` | `None` | Value: text for `type`, key for `press`, ms for `wait`, pixels for `scroll`, option value for `select` |
+| `timeout` | `int` | `5000` | Timeout in ms for selector waits |
+
+**Examples:**
+```python
+# Click "load more" then wait
+actions = [
+    Action(type="click", selector="#load-more"),
+    Action(type="wait", value="2000"),
+]
+
+# Search flow on a dynamic page
+actions = [
+    Action(type="click", selector="#search-input"),
+    Action(type="type", selector="#search-input", value="mechanical keyboard"),
+    Action(type="press", selector="#search-input", value="Enter"),
+    Action(type="wait", value="3000"),
+    Action(type="scroll", value="bottom"),
+]
+
+# Full-page screenshot after interactions
+config = ScrapeConfig(screenshot=True, actions=[...])
+```
 
 ### `SearchConfig`
 

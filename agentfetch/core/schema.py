@@ -1,5 +1,16 @@
+from typing import Literal, Optional
+
 from pydantic import BaseModel, Field
-from typing import Optional
+
+
+ActionType = Literal["click", "scroll", "type", "wait", "press", "select", "screenshot"]
+
+
+class Action(BaseModel):
+    type: ActionType
+    selector: Optional[str] = None
+    value: Optional[str] = None
+    timeout: int = 5000
 
 
 class ScrapeConfig(BaseModel):
@@ -19,6 +30,8 @@ class ScrapeConfig(BaseModel):
     category: str = "auto"
     extract_highlights: bool = False
     output_schema: Optional[dict] = None
+    actions: list[Action] = Field(default_factory=list)
+    screenshot: bool = False
 
 
 class FetchResult(BaseModel):
@@ -42,6 +55,7 @@ class FetchResult(BaseModel):
     proxy_used: Optional[str] = None
     highlights: Optional[list[str]] = None
     structured_output: Optional[dict] = None
+    screenshot_data: Optional[str] = None
 
 
 class CrawlResult(BaseModel):

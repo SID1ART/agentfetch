@@ -13,6 +13,7 @@ from .core.schema import (
     SearchResult,
     SearchConfig,
     ScrapeConfig,
+    Action,
 )
 from .core.sanitizer import sanitize
 from .core.stopper import CrawlStopper
@@ -34,6 +35,7 @@ __all__ = [
     "SearchResult",
     "SearchConfig",
     "ScrapeConfig",
+    "Action",
     "sanitize",
     "CrawlStopper",
     "extract_content",

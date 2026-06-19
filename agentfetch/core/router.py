@@ -601,6 +601,108 @@ def _stealth_init_script() -> str:
     """
 
 
+async def _execute_actions(
+    page, actions: list, base_url: str = ""
+) -> None:
+    from urllib.parse import urljoin
+
+    for i, action in enumerate(actions):
+        try:
+            if action.type == "click":
+                if action.selector:
+                    await page.wait_for_selector(
+                        action.selector, timeout=action.timeout
+                    )
+                    await page.click(action.selector)
+                    logger.debug(
+                        "Action %d: clicked '%s' on %s", i, action.selector, base_url
+                    )
+
+            elif action.type == "scroll":
+                if action.selector:
+                    await page.wait_for_selector(
+                        action.selector, timeout=action.timeout
+                    )
+                    await page.evaluate(
+                        f"document.querySelector('{action.selector}').scrollIntoView({{behavior: 'smooth', block: 'center'}})"
+                    )
+                elif action.value and action.value == "bottom":
+                    await page.evaluate(
+                        "window.scrollTo(0, document.body.scrollHeight)"
+                    )
+                elif action.value and action.value == "top":
+                    await page.evaluate("window.scrollTo(0, 0)")
+                else:
+                    await page.evaluate(
+                        f"window.scrollBy(0, {action.value or 500})"
+                    )
+                await page.wait_for_timeout(300)
+                logger.debug("Action %d: scrolled on %s", i, base_url)
+
+            elif action.type == "type":
+                if action.selector and action.value is not None:
+                    await page.wait_for_selector(
+                        action.selector, timeout=action.timeout
+                    )
+                    await page.fill(action.selector, action.value)
+                    logger.debug(
+                        "Action %d: typed into '%s' on %s",
+                        i,
+                        action.selector,
+                        base_url,
+                    )
+
+            elif action.type == "wait":
+                ms = int(action.value) if action.value else 1000
+                await page.wait_for_timeout(ms)
+                logger.debug("Action %d: waited %dms on %s", i, ms, base_url)
+
+            elif action.type == "press":
+                key = action.value or "Enter"
+                if action.selector:
+                    await page.wait_for_selector(
+                        action.selector, timeout=action.timeout
+                    )
+                    await page.press(action.selector, key)
+                else:
+                    await page.keyboard.press(key)
+                logger.debug(
+                    "Action %d: pressed '%s' on %s", i, key, base_url
+                )
+
+            elif action.type == "select":
+                if action.selector and action.value is not None:
+                    await page.wait_for_selector(
+                        action.selector, timeout=action.timeout
+                    )
+                    await page.select_option(
+                        action.selector, action.value
+                    )
+                    logger.debug(
+                        "Action %d: selected '%s' in '%s' on %s",
+                        i,
+                        action.value,
+                        action.selector,
+                        base_url,
+                    )
+
+            elif action.type == "screenshot":
+                logger.debug(
+                    "Action %d: screenshot triggered mid-flow on %s",
+                    i,
+                    base_url,
+                )
+
+        except Exception as e:
+            logger.warning(
+                "Action %d (%s) failed on %s: %s",
+                i,
+                action.type,
+                base_url,
+                e,
+            )
+
+
 async def _browser_fetch(
     url: str,
     config: Optional[ScrapeConfig] = None,
@@ -619,6 +721,7 @@ async def _browser_fetch(
             render_mode="browser",
             normalized_url=normalize_url(url),
         )
+    screenshot_data = None
     try:
         cookies = config.cookies or _load_cookies()
         fp = _pick_fingerprint(config.viewport)
@@ -672,6 +775,17 @@ async def _browser_fetch(
             if config.js_wait_ms:
                 await page.wait_for_timeout(config.js_wait_ms)
 
+            if config.actions:
+                await _execute_actions(page, config.actions, base_url=url)
+
+            if config.screenshot:
+                screenshot_bytes = await page.screenshot(
+                    full_page=True, type="png"
+                )
+                import base64
+
+                screenshot_data = base64.b64encode(screenshot_bytes).decode("utf-8")
+
             html = await page.content()
             await browser.close()
     except Exception as e:
@@ -712,6 +826,7 @@ async def _browser_fetch(
         links=links,
         normalized_url=normalize_url(url),
         citations=citations if (config and config.citation_links) else None,
+        screenshot_data=screenshot_data,
     )
     return result
 
