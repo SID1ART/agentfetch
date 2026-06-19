@@ -3,7 +3,10 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
-ActionType = Literal["click", "scroll", "type", "wait", "press", "select", "screenshot"]
+ActionType = Literal[
+    "click", "scroll", "type", "wait", "press", "select", "screenshot",
+    "hover", "custom_js",
+]
 
 
 class Action(BaseModel):
@@ -11,6 +14,7 @@ class Action(BaseModel):
     selector: Optional[str] = None
     value: Optional[str] = None
     timeout: int = 5000
+    store_output: bool = False
 
 
 class ScrapeConfig(BaseModel):
@@ -56,6 +60,7 @@ class FetchResult(BaseModel):
     highlights: Optional[list[str]] = None
     structured_output: Optional[dict] = None
     screenshot_data: Optional[str] = None
+    screenshots: list[str] = Field(default_factory=list)
 
 
 class CrawlResult(BaseModel):
@@ -77,6 +82,28 @@ class SearchConfig(BaseModel):
     proxy: Optional[str] = None
     category: str = "auto"
     depth: str = "auto"
+    search_depth: str = "basic"
+    topic: str = "general"
+    time_range: Optional[str] = None
+    country: Optional[str] = None
+    include_answer: bool = False
+
+
+class MapConfig(BaseModel):
+    max_depth: int = 2
+    max_pages: int = 100
+    include_patterns: Optional[list[str]] = None
+    exclude_patterns: Optional[list[str]] = None
+    include_domains: Optional[list[str]] = None
+    exclude_domains: Optional[list[str]] = None
+    respect_robots: bool = True
+
+
+class MapResult(BaseModel):
+    base_url: str
+    links: list[str] = Field(default_factory=list)
+    total: int = 0
+    sources: list[str] = Field(default_factory=list)
 
 
 class SearchResult(BaseModel):
@@ -87,3 +114,4 @@ class SearchResult(BaseModel):
     suggestions: Optional[list[str]] = None
     total_results: int = 0
     errors: dict[str, str] = Field(default_factory=dict)
+    answer: Optional[str] = None

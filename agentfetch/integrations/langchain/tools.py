@@ -6,6 +6,7 @@ except ImportError:
     )
 
 from ...core.router import smart_fetch, batch_fetch
+from ...core.mapper import smart_map
 from ...core.schema import FetchResult, CrawlResult
 
 
@@ -68,6 +69,43 @@ async def agentfetch_crawl(
 
 
 @tool
+async def agentfetch_map(
+    url: str,
+    max_depth: int = 2,
+    max_pages: int = 100,
+    include_patterns: str = "",
+    exclude_patterns: str = "",
+) -> str:
+    """Discover all URLs on a website. First tries sitemap.xml, then BFS crawling.
+
+    Args:
+        url: The root URL to map.
+        max_depth: Maximum crawl depth (default 2).
+        max_pages: Maximum URLs to discover (default 100).
+        include_patterns: Comma-separated regex patterns to include.
+        exclude_patterns: Comma-separated regex patterns to exclude.
+    """
+    from ...core.schema import MapConfig
+
+    config = MapConfig(
+        max_depth=max_depth,
+        max_pages=max_pages,
+        include_patterns=include_patterns.split(",") if include_patterns else None,
+        exclude_patterns=exclude_patterns.split(",") if exclude_patterns else None,
+    )
+    result = await smart_map(url, config=config)
+    lines = [
+        f"Mapped: {result.base_url}",
+        f"Sources: {', '.join(result.sources)}",
+        f"Total URLs discovered: {result.total}",
+        "",
+    ]
+    for link in result.links:
+        lines.append(link)
+    return "\n".join(lines)
+
+
+@tool
 async def agentfetch_status(job_id: str) -> str:
     """Check the status of a crawl job.
 
@@ -102,5 +140,6 @@ AgentFetchTools = [
     agentfetch_scrape,
     agentfetch_search,
     agentfetch_crawl,
+    agentfetch_map,
     agentfetch_status,
 ]

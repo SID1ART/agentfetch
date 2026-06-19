@@ -1,7 +1,8 @@
 """OpenAI-compatible tool definitions for any framework using OpenAI function calling."""
 
 from ...core.router import smart_fetch
-from ...core.schema import CrawlResult
+from ...core.mapper import smart_map
+from ...core.schema import CrawlResult, MapConfig
 from ...api.routes import agent_search, CrawlRequest, _run_crawl, _crawl_jobs
 import asyncio
 import json
@@ -56,6 +57,22 @@ def get_tools() -> list[dict]:
                         "max_depth": {"type": "integer", "default": 2},
                         "max_pages": {"type": "integer", "default": 10},
                         "query": {"type": "string", "default": ""},
+                    },
+                    "required": ["url"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "agentfetch_map",
+                "description": "Discover all URLs on a website via sitemap.xml and crawling.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "Root URL to map"},
+                        "max_depth": {"type": "integer", "default": 2},
+                        "max_pages": {"type": "integer", "default": 100},
                     },
                     "required": ["url"],
                 },
@@ -127,6 +144,19 @@ async def handle_tool_call(name: str, args: dict) -> str:
 
             asyncio.create_task(_run_crawl(job_id, req))
             return json.dumps({"job_id": job_id, "status": "pending"})
+
+        elif name == "agentfetch_map":
+            config = MapConfig(
+                max_depth=args.get("max_depth", 2),
+                max_pages=args.get("max_pages", 100),
+            )
+            result = await smart_map(args["url"], config=config)
+            return json.dumps({
+                "base_url": result.base_url,
+                "total": result.total,
+                "sources": result.sources,
+                "links": result.links,
+            })
 
         elif name == "agentfetch_status":
             from ...api.routes import _crawl_store

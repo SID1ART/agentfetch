@@ -85,6 +85,19 @@ async def list_tools():
             },
         },
         {
+            "name": "agent_map",
+            "description": "Discover all URLs on a website via sitemap and crawling.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "max_depth": {"type": "integer", "default": 2},
+                    "max_pages": {"type": "integer", "default": 100},
+                },
+                "required": ["url"],
+            },
+        },
+        {
             "name": "agent_status",
             "description": "Check the status of an async crawl job.",
             "inputSchema": {
@@ -100,9 +113,10 @@ async def list_tools():
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list:
-    from ..core.router import smart_fetch
-    from ..core.schema import FetchResult, CrawlResult
-    from ..api.routes import _crawl_jobs, _crawl_store, _run_crawl, agent_search
+from ..core.router import smart_fetch
+from ..core.mapper import smart_map
+from ..core.schema import FetchResult, CrawlResult, MapConfig
+from ..api.routes import _crawl_jobs, _crawl_store, _run_crawl, agent_search
 
     try:
         if name == "agent_scrape":
@@ -186,6 +200,21 @@ async def call_tool(name: str, arguments: dict) -> list:
                     "text": f"# Extracted Data\n\nURL: {result.url}\n\n{result.content}",
                 }
             ]
+
+        elif name == "agent_map":
+            config = MapConfig(
+                max_depth=arguments.get("max_depth", 2),
+                max_pages=arguments.get("max_pages", 100),
+            )
+            result = await smart_map(arguments["url"], config=config)
+            lines = [
+                f"# Map Results for: {result.base_url}",
+                f"Sources: {', '.join(result.sources)}",
+                f"Total URLs: {result.total}",
+                "",
+            ]
+            lines.extend(result.links)
+            return [{"type": "text", "text": "\n".join(lines)}]
 
         elif name == "agent_status":
             job_id = arguments["job_id"]

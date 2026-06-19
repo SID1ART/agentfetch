@@ -1,4 +1,5 @@
 from .core.router import smart_fetch, batch_fetch
+from .core.mapper import smart_map
 from .core.searchengine import (
     parallel_search,
     search_fetch,
@@ -13,6 +14,8 @@ from .core.schema import (
     SearchResult,
     SearchConfig,
     ScrapeConfig,
+    MapResult,
+    MapConfig,
     Action,
 )
 from .core.sanitizer import sanitize
@@ -27,6 +30,7 @@ from .core.extractor import (
 __all__ = [
     "smart_fetch",
     "batch_fetch",
+    "smart_map",
     "parallel_search",
     "search_fetch",
     "stream_search",
@@ -35,6 +39,8 @@ __all__ = [
     "SearchResult",
     "SearchConfig",
     "ScrapeConfig",
+    "MapResult",
+    "MapConfig",
     "Action",
     "sanitize",
     "CrawlStopper",

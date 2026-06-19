@@ -104,6 +104,7 @@ class EngineResult:
     url: str
     snippet: str
     source: str
+    score: float = 0.0
 
 
 def _search_client(**kwargs) -> httpx.AsyncClient:
@@ -115,15 +116,33 @@ def _search_client(**kwargs) -> httpx.AsyncClient:
     return httpx.AsyncClient(**merged)
 
 
-async def _search_ddg(query: str, max_results: int) -> list[EngineResult]:
+DDG_TIME_MAP = {"day": "d", "week": "w", "month": "m", "year": "y"}
+DDG_REGION_MAP = {
+    "united states": "us-en", "united kingdom": "uk-en",
+    "australia": "au-en", "canada": "ca-en",
+    "germany": "de-de", "france": "fr-fr",
+    "japan": "jp-jp", "india": "in-en",
+    "brazil": "br-pt", "spain": "es-es",
+    "italy": "it-it", "netherlands": "nl-nl",
+}
+
+
+async def _search_ddg(
+    query: str, max_results: int, time_range: str = "", country: str = ""
+) -> list[EngineResult]:
     try:
         from duckduckgo_search import DDGS
 
         loop = asyncio.get_event_loop()
+        kwargs = {"max_results": max_results}
+        if time_range and time_range in DDG_TIME_MAP:
+            kwargs["time"] = DDG_TIME_MAP[time_range]
+        if country and country.lower() in DDG_REGION_MAP:
+            kwargs["region"] = DDG_REGION_MAP[country.lower()]
 
         def _fetch():
             with DDGS() as ddgs:
-                return list(ddgs.text(query, max_results=max_results))
+                return list(ddgs.text(query, **kwargs))
 
         results = await loop.run_in_executor(None, _fetch)
         return [
@@ -132,6 +151,7 @@ async def _search_ddg(query: str, max_results: int) -> list[EngineResult]:
                 url=r.get("href", ""),
                 snippet=r.get("body", ""),
                 source="duckduckgo",
+                score=r.get("relevance", 0.0) if isinstance(r.get("relevance"), (int, float)) else 0.0,
             )
             for r in results
             if r.get("href")
@@ -143,7 +163,19 @@ async def _search_ddg(query: str, max_results: int) -> list[EngineResult]:
         return []
 
 
-async def _search_brave_api(query: str, max_results: int) -> list[EngineResult]:
+BRAVE_TIME_MAP = {"day": "pd", "week": "pw", "month": "pm", "year": "py"}
+BRAVE_REGION_MAP = {
+    "united states": "US", "united kingdom": "GB",
+    "australia": "AU", "canada": "CA",
+    "germany": "DE", "france": "FR",
+    "japan": "JP", "india": "IN",
+    "brazil": "BR", "spain": "ES",
+}
+
+
+async def _search_brave_api(
+    query: str, max_results: int, time_range: str = "", country: str = ""
+) -> list[EngineResult]:
     if not BRAVE_SEARCH_API_KEY:
         return []
     try:
@@ -153,6 +185,10 @@ async def _search_brave_api(query: str, max_results: int) -> list[EngineResult]:
             "Accept": "application/json",
         }
         params = {"q": query, "count": min(max_results, 20)}
+        if time_range and time_range in BRAVE_TIME_MAP:
+            params["freshness"] = BRAVE_TIME_MAP[time_range]
+        if country and country.lower() in BRAVE_REGION_MAP:
+            params["country"] = BRAVE_REGION_MAP[country.lower()]
         async with _search_client() as client:
             resp = await client.get(url, headers=headers, params=params)
             resp.raise_for_status()
@@ -165,6 +201,7 @@ async def _search_brave_api(query: str, max_results: int) -> list[EngineResult]:
                     url=item.get("url", ""),
                     snippet=item.get("description", ""),
                     source="brave",
+                    score=item.get("relevance_score", 0.0) if isinstance(item.get("relevance_score"), (int, float)) else 0.0,
                 )
             )
         return results
@@ -280,11 +317,20 @@ async def _search_google(query: str, max_results: int) -> list[EngineResult]:
         return []
 
 
-async def _search_bing(query: str, max_results: int) -> list[EngineResult]:
+BING_TIME_MAP = {"day": "Day", "week": "Week", "month": "Month", "year": "Year"}
+
+
+async def _search_bing(
+    query: str, max_results: int, time_range: str = "", country: str = ""
+) -> list[EngineResult]:
     try:
         from bs4 import BeautifulSoup
 
         url = f"https://www.bing.com/search?q={quote(query)}&count={max_results}"
+        if time_range and time_range in BING_TIME_MAP:
+            url += f"&freshness={BING_TIME_MAP[time_range]}"
+        if country:
+            url += f"&cc={country.lower()}"
         headers = {
             "User-Agent": random.choice(USER_AGENTS),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -398,6 +444,12 @@ def _resolve_sources(sources: Optional[list[str]], searxng_url: str) -> list[str
     return resolved
 
 
+TOPIC_QUERY_MODIFIERS = {
+    "news": "latest OR today OR breaking OR news",
+    "finance": "stock OR market OR finance OR earnings OR financial",
+}
+
+
 async def parallel_search(
     query: str,
     sources: Optional[list[str]] = None,
@@ -405,11 +457,18 @@ async def parallel_search(
     searxng_url: str = "",
     depth: str = "auto",
     category: str = "auto",
+    topic: str = "general",
+    time_range: str = "",
+    country: str = "",
 ) -> tuple[list[EngineResult], list[str], dict[str, str]]:
     valid_sources = _resolve_sources(sources, searxng_url)
 
     if category != "auto" and category in CATEGORY_QUERY_MODIFIERS:
         modifier = CATEGORY_QUERY_MODIFIERS[category]
+        query = f"({query}) {modifier}"
+
+    if topic != "general" and topic in TOPIC_QUERY_MODIFIERS:
+        modifier = TOPIC_QUERY_MODIFIERS[topic]
         query = f"({query}) {modifier}"
 
     queries_to_run = [query]
@@ -425,9 +484,15 @@ async def parallel_search(
 
         async def _run_with_retry(src: str) -> list[EngineResult]:
             fn = _get_engine_fn(src)
+            kwargs = {}
+            if src in ("duckduckgo", "brave", "bing"):
+                if time_range:
+                    kwargs["time_range"] = time_range
+                if country:
+                    kwargs["country"] = country
             if src == "searxng":
                 return await _with_search_retry(fn, q, max_results, searxng_url)
-            return await _with_search_retry(fn, q, max_results)
+            return await _with_search_retry(fn, q, max_results, **kwargs)
 
         tasks = [_run_with_retry(src) for src in valid_sources]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -447,6 +512,7 @@ async def parallel_search(
                     seen_urls[dedup_key] = r.url
                     merged.append(r)
 
+    merged.sort(key=lambda r: -r.score)
     return merged[:max_results], sorted(engines_used), engine_errors
 
 
@@ -487,6 +553,10 @@ async def search_fetch(
     config: Optional[ScrapeConfig] = None,
     category: str = "auto",
     depth: str = "auto",
+    topic: str = "general",
+    time_range: str = "",
+    country: str = "",
+    include_answer: bool = False,
 ) -> SearchResult:
     config = config or ScrapeConfig()
     if category != "auto":
@@ -499,6 +569,9 @@ async def search_fetch(
         searxng_url=searxng_url,
         depth=depth,
         category=category,
+        topic=topic,
+        time_range=time_range,
+        country=country,
     )
 
     fetch_results: list[FetchResult] = []
@@ -541,6 +614,10 @@ async def search_fetch(
                 )
             )
 
+    answer = None
+    if include_answer and engines_used:
+        answer = await _generate_answer(query, results)
+
     source_label = "+".join(engines_used) if engines_used else "none"
     return SearchResult(
         query=query,
@@ -549,7 +626,51 @@ async def search_fetch(
         sources_used=engines_used,
         errors=engine_errors,
         total_results=len(results),
+        answer=answer,
     )
+
+
+async def _generate_answer(query: str, results: list[EngineResult]) -> Optional[str]:
+    snippets = "\n\n".join(
+        f"Title: {r.title}\nURL: {r.url}\nContent: {r.snippet}" for r in results[:5]
+    )
+    prompt = (
+        f"Based on the following search results, provide a concise answer to the question.\n\n"
+        f"Question: {query}\n\n"
+        f"Search Results:\n{snippets}\n\n"
+        f"Answer:"
+    )
+    ollama_url = os.environ.get("OLLAMA_URL", "")
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+
+    if ollama_url:
+        try:
+            model = os.environ.get("OLLAMA_MODEL", "llama3.2")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{ollama_url}/api/generate",
+                    json={"model": model, "prompt": prompt, "stream": False},
+                )
+                data = resp.json()
+                return data.get("response", "").strip() or None
+        except Exception:
+            pass
+
+    if anthropic_key:
+        try:
+            import anthropic
+
+            client = anthropic.Anthropic(api_key=anthropic_key)
+            msg = client.messages.create(
+                model=os.environ.get("ANTHROPIC_MODEL", "claude-3-haiku-20240307"),
+                max_tokens=500,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return msg.content[0].text.strip() or None
+        except Exception:
+            pass
+
+    return None
 
 
 def _guess_category_from_snippet(snippet: str, url: str) -> str:

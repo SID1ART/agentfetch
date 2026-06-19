@@ -10,11 +10,14 @@ from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 
 from ..core.router import smart_fetch, batch_fetch
+from ..core.mapper import smart_map as smart_map_fn
 from ..core.searchengine import parallel_search, search_fetch, _configure_searxng
 from ..core.sanitizer import sanitize
 from ..core.schema import (
     FetchResult,
     CrawlResult,
+    MapResult,
+    MapConfig,
     SearchResult,
     SearchConfig,
     ScrapeConfig,
@@ -78,12 +81,26 @@ class SearchRequest(BaseModel):
     max_results: int = 5
     scrape_results: bool = True
     sources: Optional[list[str]] = None
+    topic: str = "general"
+    time_range: Optional[str] = None
+    country: Optional[str] = None
+    include_answer: bool = False
 
 
 class ExtractRequest(BaseModel):
     url: str
     extract_schema: dict
     provider: str = "auto"
+
+
+class MapRequest(BaseModel):
+    url: str
+    max_depth: int = 2
+    max_pages: int = 100
+    include_patterns: Optional[list[str]] = None
+    exclude_patterns: Optional[list[str]] = None
+    include_domains: Optional[list[str]] = None
+    exclude_domains: Optional[list[str]] = None
 
 
 class SearchResultItem(BaseModel):
@@ -171,6 +188,10 @@ async def agent_search(req: SearchRequest) -> SearchResult:
         sources=req.sources,
         scrape_results=req.scrape_results,
         searxng_url=SEARXNG_URL,
+        topic=req.topic,
+        time_range=req.time_range,
+        country=req.country,
+        include_answer=req.include_answer,
     )
     return await search_fetch(
         query=req.query,
@@ -178,6 +199,10 @@ async def agent_search(req: SearchRequest) -> SearchResult:
         max_results=config.max_results,
         scrape_results=config.scrape_results,
         searxng_url=config.searxng_url,
+        topic=config.topic,
+        time_range=config.time_range,
+        country=config.country,
+        include_answer=config.include_answer,
     )
 
 
@@ -193,6 +218,19 @@ async def agent_extract(req: ExtractRequest) -> FetchResult:
         page = _css_extract(page, req.extract_schema)
 
     return page
+
+
+@router.post("/agent_map")
+async def agent_map(req: MapRequest) -> MapResult:
+    config = MapConfig(
+        max_depth=req.max_depth,
+        max_pages=req.max_pages,
+        include_patterns=req.include_patterns,
+        exclude_patterns=req.exclude_patterns,
+        include_domains=req.include_domains,
+        exclude_domains=req.exclude_domains,
+    )
+    return await smart_map_fn(req.url, config=config)
 
 
 async def _ollama_extract(page: FetchResult, schema: dict) -> FetchResult:

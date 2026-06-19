@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -11,7 +12,7 @@ from typing import Optional
 
 import httpx
 
-from .schema import FetchResult, ScrapeConfig
+from .schema import Action, FetchResult, ScrapeConfig
 from .extractor import (
     extract_content,
     detect_content_type,
@@ -602,9 +603,10 @@ def _stealth_init_script() -> str:
 
 
 async def _execute_actions(
-    page, actions: list, base_url: str = ""
-) -> None:
-    from urllib.parse import urljoin
+    page, actions: list[Action], base_url: str = ""
+) -> list[str]:
+    screenshots: list[str] = []
+    nav_triggering = {"click", "press", "type"}
 
     for i, action in enumerate(actions):
         try:
@@ -614,6 +616,7 @@ async def _execute_actions(
                         action.selector, timeout=action.timeout
                     )
                     await page.click(action.selector)
+                    await page.wait_for_load_state("networkidle", timeout=5000)
                     logger.debug(
                         "Action %d: clicked '%s' on %s", i, action.selector, base_url
                     )
@@ -666,6 +669,7 @@ async def _execute_actions(
                     await page.press(action.selector, key)
                 else:
                     await page.keyboard.press(key)
+                await page.wait_for_load_state("networkidle", timeout=5000)
                 logger.debug(
                     "Action %d: pressed '%s' on %s", i, key, base_url
                 )
@@ -686,11 +690,38 @@ async def _execute_actions(
                         base_url,
                     )
 
+            elif action.type == "hover":
+                if action.selector:
+                    await page.wait_for_selector(
+                        action.selector, timeout=action.timeout
+                    )
+                    await page.hover(action.selector)
+                    logger.debug(
+                        "Action %d: hovered '%s' on %s", i, action.selector, base_url
+                    )
+
+            elif action.type == "custom_js":
+                if action.value:
+                    js_code = action.value
+                    if action.selector:
+                        js_code = (
+                            f"document.querySelector('{action.selector}').{js_code}"
+                            if not js_code.startswith("(") and not js_code.startswith("function")
+                            else js_code
+                        )
+                    await page.evaluate(js_code)
+                    await page.wait_for_load_state("networkidle", timeout=5000)
+                    logger.debug(
+                        "Action %d: executed custom JS on %s", i, base_url
+                    )
+
             elif action.type == "screenshot":
+                sb = await page.screenshot(full_page=True, type="png")
+                b64 = base64.b64encode(sb).decode("utf-8")
+                if action.store_output:
+                    screenshots.append(b64)
                 logger.debug(
-                    "Action %d: screenshot triggered mid-flow on %s",
-                    i,
-                    base_url,
+                    "Action %d: screenshot captured on %s", i, base_url
                 )
 
         except Exception as e:
@@ -701,6 +732,8 @@ async def _execute_actions(
                 base_url,
                 e,
             )
+
+    return screenshots
 
 
 async def _browser_fetch(
@@ -721,6 +754,7 @@ async def _browser_fetch(
             render_mode="browser",
             normalized_url=normalize_url(url),
         )
+    screenshots: list[str] = []
     screenshot_data = None
     try:
         cookies = config.cookies or _load_cookies()
@@ -776,15 +810,11 @@ async def _browser_fetch(
                 await page.wait_for_timeout(config.js_wait_ms)
 
             if config.actions:
-                await _execute_actions(page, config.actions, base_url=url)
+                screenshots = await _execute_actions(page, config.actions, base_url=url)
 
             if config.screenshot:
-                screenshot_bytes = await page.screenshot(
-                    full_page=True, type="png"
-                )
-                import base64
-
-                screenshot_data = base64.b64encode(screenshot_bytes).decode("utf-8")
+                sb = await page.screenshot(full_page=True, type="png")
+                screenshot_data = base64.b64encode(sb).decode("utf-8")
 
             html = await page.content()
             await browser.close()
@@ -827,6 +857,7 @@ async def _browser_fetch(
         normalized_url=normalize_url(url),
         citations=citations if (config and config.citation_links) else None,
         screenshot_data=screenshot_data,
+        screenshots=screenshots,
     )
     return result
 

@@ -6,7 +6,8 @@ from mcp.server import Server
 from mcp.server.models import InitializationOptions
 
 from ..core.router import smart_fetch
-from ..core.schema import FetchResult, CrawlResult
+from ..core.mapper import smart_map
+from ..core.schema import FetchResult, CrawlResult, MapConfig
 from ..api.routes import _crawl_jobs, _crawl_store, _run_crawl, agent_search
 
 logger = logging.getLogger("agentfetch.mcp.sse")
@@ -65,6 +66,19 @@ async def list_tools():
                     "schema": {"type": "string"},
                 },
                 "required": ["url", "schema"],
+            },
+        },
+        {
+            "name": "agent_map",
+            "description": "Discover all URLs on a website via sitemap and crawling.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "max_depth": {"type": "integer", "default": 2},
+                    "max_pages": {"type": "integer", "default": 100},
+                },
+                "required": ["url"],
             },
         },
         {
@@ -149,6 +163,21 @@ async def call_tool(name: str, arguments: dict) -> list:
             req = ExtractRequest(url=url, extract_schema=schema_dict, provider="auto")
             result = await ae(req)
             return [{"type": "text", "text": f"# Extracted Data\n\n{result.content}"}]
+
+        elif name == "agent_map":
+            config = MapConfig(
+                max_depth=arguments.get("max_depth", 2),
+                max_pages=arguments.get("max_pages", 100),
+            )
+            result = await smart_map(arguments["url"], config=config)
+            lines = [
+                f"# Map Results for: {result.base_url}",
+                f"Sources: {', '.join(result.sources)}",
+                f"Total URLs: {result.total}",
+                "",
+            ]
+            lines.extend(result.links)
+            return [{"type": "text", "text": "\n".join(lines)}]
 
         elif name == "agent_status":
             job_id = arguments["job_id"]

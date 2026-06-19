@@ -55,6 +55,7 @@ No PyPI account, no API tokens, no sign-up needed. GitHub is the source.
 | `agent_crawl` | Recursive crawl with information saturation stopping, robots.txt compliance, deduplication. |
 | `agent_search` | Web search via SearXNG, DuckDuckGo, Google, or Bing with optional result scraping. |
 | `agent_extract` | Structured data extraction by JSON schema via Ollama, Anthropic Claude, or CSS fallback. |
+| `agent_map` | Discover all URLs on a website via sitemap.xml and BFS crawling. |
 | `agent_status` | Poll crawl job progress (in-memory or Redis). |
 
 ### Library API
@@ -155,8 +156,8 @@ print(sr.sources_used) # engines that returned results
 | `headers` | `dict[str,str]` | `None` | Custom HTTP headers |
 | `ja3` | `str` | `None` | JA3 TLS profile for `curl_cffi` bypass (e.g. `"chrome124"`) |
 | `stealth` | `bool` | `True` | Enable browser stealth evasions (playwright-stealth if available) |
-| `actions` | `list[Action]` | `[]` | Action chain to execute before extraction (click, scroll, type, wait, press, select, screenshot) |
-| `screenshot` | `bool` | `False` | Capture a full-page screenshot (PNG, base64-encoded in `screenshot_data`) |
+| `actions` | `list[Action]` | `[]` | Action chain to execute before extraction (click, scroll, type, wait, press, select, screenshot, hover, custom_js) |
+| `screenshot` | `bool` | `False` | Capture a full-page final screenshot (PNG, base64-encoded in `screenshot_data`) |
 
 ### `FetchResult`
 
@@ -180,35 +181,48 @@ print(sr.sources_used) # engines that returned results
 | `robots_allowed` | `bool` | Whether robots.txt permitted the fetch |
 | `proxy_used` | `str` | Proxy used for this request |
 | `normalized_url` | `str` | Normalized version of the requested URL |
-| `screenshot_data` | `str` | Base64-encoded PNG screenshot (when `screenshot=True` in ScrapeConfig) |
+| `screenshot_data` | `str` | Base64-encoded final PNG screenshot (when `screenshot=True` in ScrapeConfig) |
+| `screenshots` | `list[str]` | Base64-encoded PNG screenshots from mid-flow screenshot actions (when `store_output=True`) |
 
 ### `Action`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `type` | `str` | — | Action type: `click`, `scroll`, `type`, `wait`, `press`, `select`, or `screenshot` |
-| `selector` | `str` | `None` | CSS selector for `click`, `type`, `scroll`, `press`, `select` actions |
-| `value` | `str` | `None` | Value: text for `type`, key for `press`, ms for `wait`, pixels for `scroll`, option value for `select` |
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `type` | `str` | — | Action type: `click`, `scroll`, `type`, `wait`, `press`, `select`, `screenshot`, `hover`, or `custom_js` |
+| `selector` | `str` | `None` | CSS selector for `click`, `type`, `scroll`, `press`, `select`, `hover` actions |
+| `value` | `str` | `None` | Value: text for `type`, key for `press`, ms for `wait`, pixels for `scroll`, option value for `select`, JS code for `custom_js` |
 | `timeout` | `int` | `5000` | Timeout in ms for selector waits |
+| `store_output` | `bool` | `False` | When `True`, stores `screenshot` action output in `FetchResult.screenshots` list |
+
+**Action details:**
+- **click** — clicks a CSS selector, waits for `networkidle` afterward
+- **scroll** — scrolls to selector, `"bottom"`, `"top"`, or by N pixels
+- **type** — fills an input field with `value`
+- **wait** — waits N milliseconds (`value`)
+- **press** — presses a key (`value`, default `"Enter"`), waits for `networkidle`
+- **select** — selects a `<select>` option by `value`
+- **screenshot** — captures a full-page PNG; stored in `screenshots[]` if `store_output=True`
+- **hover** — hovers over a CSS selector
+- **custom_js** — runs arbitrary JavaScript from `value` on the page, waits for `networkidle`
 
 **Examples:**
 ```python
-# Click "load more" then wait
+# Hover to reveal dropdown, then click
 actions = [
-    Action(type="click", selector="#load-more"),
-    Action(type="wait", value="2000"),
+    Action(type="hover", selector="#nav-menu"),
+    Action(type="wait", value="500"),
+    Action(type="click", selector="#nav-menu .dropdown-item"),
 ]
 
-# Search flow on a dynamic page
+# Run custom JS and capture mid-flow screenshot
 actions = [
-    Action(type="click", selector="#search-input"),
-    Action(type="type", selector="#search-input", value="mechanical keyboard"),
-    Action(type="press", selector="#search-input", value="Enter"),
-    Action(type="wait", value="3000"),
-    Action(type="scroll", value="bottom"),
+    Action(type="custom_js", value="document.querySelector('.paywall')?.remove()"),
+    Action(type="screenshot", store_output=True),
 ]
 
-# Full-page screenshot after interactions
+# Full-page final screenshot
 config = ScrapeConfig(screenshot=True, actions=[...])
 ```
 
@@ -220,6 +234,10 @@ config = ScrapeConfig(screenshot=True, actions=[...])
 | `sources` | `list[str]` | `None` | Engines: `duckduckgo`, `google`, `bing`, `searxng`, `brave`, `serpapi` |
 | `scrape_results` | `bool` | `True` | Fetch full content of each result |
 | `searxng_url` | `str` | `""` | Self-hosted SearXNG instance URL |
+| `topic` | `str` | `"general"` | Search topic: `general`, `news`, or `finance` |
+| `time_range` | `str` | `None` | Time filter: `day`, `week`, `month`, or `year` |
+| `country` | `str` | `None` | Boost results from a country (e.g. `"united states"`, `"united kingdom"`) |
+| `include_answer` | `bool` | `False` | Include an LLM-generated answer via Ollama or Anthropic |
 
 ### `SearchResult`
 
@@ -232,6 +250,28 @@ config = ScrapeConfig(screenshot=True, actions=[...])
 | `suggestions` | `list[str]` | Search suggestions (if available) |
 | `total_results` | `int` | Total deduplicated result count |
 | `errors` | `dict[str,str]` | Per-engine error messages (e.g. `{"google": "rate limited (429)"}`) |
+| `answer` | `str` | LLM-generated answer when `include_answer=True` in SearchConfig |
+
+### `MapConfig`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_depth` | `int` | `2` | Maximum crawl depth for link discovery |
+| `max_pages` | `int` | `100` | Maximum URLs to discover |
+| `include_patterns` | `list[str]` | `None` | Regex patterns to include only matching paths |
+| `exclude_patterns` | `list[str]` | `None` | Regex patterns to exclude matching paths |
+| `include_domains` | `list[str]` | `None` | Only include URLs from these domains |
+| `exclude_domains` | `list[str]` | `None` | Exclude URLs from these domains |
+| `respect_robots` | `bool` | `True` | Respect robots.txt during crawl discovery |
+
+### `MapResult`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `base_url` | `str` | The root URL that was mapped |
+| `links` | `list[str]` | Discovered URLs |
+| `total` | `int` | Total number of discovered URLs |
+| `sources` | `list[str]` | Discovery methods used (`sitemap`, `crawl`) |
 
 ## Configuration
 

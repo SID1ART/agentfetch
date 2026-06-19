@@ -6,7 +6,8 @@ except ImportError:
     )
 
 from ...core.router import smart_fetch
-from ...core.schema import CrawlResult
+from ...core.mapper import smart_map
+from ...core.schema import CrawlResult, MapConfig
 from ...api.routes import agent_search, CrawlRequest, _run_crawl, _crawl_jobs
 import uuid
 
@@ -40,6 +41,22 @@ async def crawl(
 
     asyncio.create_task(_run_crawl(job_id, req))
     return f"Crawl started. Job ID: {job_id}"
+
+
+async def map_urls(
+    url: str, max_depth: int = 2, max_pages: int = 100
+) -> str:
+    result = await smart_map(url, config=MapConfig(
+        max_depth=max_depth, max_pages=max_pages
+    ))
+    lines = [
+        f"Mapped: {result.base_url}",
+        f"Sources: {', '.join(result.sources)}",
+        f"Total URLs: {result.total}",
+        "",
+    ]
+    lines.extend(result.links)
+    return "\n".join(lines)
 
 
 async def status(job_id: str) -> str:
@@ -79,5 +96,10 @@ class AgentFetchToolSpec:
                 async_fn=status,
                 name="agentfetch_status",
                 description="Check the status of a crawl job by job_id",
+            ),
+            FunctionTool.from_defaults(
+                async_fn=map_urls,
+                name="agentfetch_map",
+                description="Discover all URLs on a website via sitemap and crawl",
             ),
         ]
